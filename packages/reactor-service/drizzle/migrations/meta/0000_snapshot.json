@@ -1,5 +1,5 @@
 {
-  "id": "57f6a2e8-80d7-431c-a0f0-fff8dbf5a4d6",
+  "id": "19d29612-c348-4f85-8999-aa35f2ffcd6a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "6",
   "dialect": "postgresql",
@@ -10,18 +10,12 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "varchar(64)",
           "primaryKey": true,
           "notNull": true
         },
         "tool_name": {
           "name": "tool_name",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "domain": {
-          "name": "domain",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true
@@ -44,27 +38,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "error_message": {
-          "name": "error_message",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "error_class": {
-          "name": "error_class",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "duration_ms": {
           "name": "duration_ms",
           "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "idea_meta": {
-          "name": "idea_meta",
-          "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
@@ -74,6 +50,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -81,13 +63,6 @@
           "name": "experience_tool_name_idx",
           "columns": [
             "tool_name"
-          ],
-          "isUnique": false
-        },
-        "experience_domain_idx": {
-          "name": "experience_domain_idx",
-          "columns": [
-            "domain"
           ],
           "isUnique": false
         },
@@ -120,30 +95,6 @@
           "primaryKey": true,
           "notNull": true
         },
-        "domain": {
-          "name": "domain",
-          "type": "varchar(128)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "path": {
-          "name": "path",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "parent_ref": {
-          "name": "parent_ref",
-          "type": "varchar(512)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "schema": {
           "name": "schema",
           "type": "jsonb",
@@ -168,27 +119,19 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
-        "ideas_domain_idx": {
-          "name": "ideas_domain_idx",
+        "ideas_created_at_idx": {
+          "name": "ideas_created_at_idx",
           "columns": [
-            "domain"
-          ],
-          "isUnique": false
-        },
-        "ideas_path_idx": {
-          "name": "ideas_path_idx",
-          "columns": [
-            "path"
-          ],
-          "isUnique": false
-        },
-        "ideas_parent_ref_idx": {
-          "name": "ideas_parent_ref_idx",
-          "columns": [
-            "parent_ref"
+            "created_at"
           ],
           "isUnique": false
         }
@@ -203,37 +146,25 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "varchar(64)",
           "primaryKey": true,
           "notNull": true
         },
-        "domain": {
-          "name": "domain",
-          "type": "varchar(128)",
+        "topic": {
+          "name": "topic",
+          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": true
         },
-        "type": {
-          "name": "type",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
+        "description": {
+          "name": "description",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "content": {
-          "name": "content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "evidence": {
-          "name": "evidence",
-          "type": "jsonb",
+        "source": {
+          "name": "source",
+          "type": "varchar(256)",
           "primaryKey": false,
           "notNull": false
         },
@@ -243,20 +174,26 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
-        "lessons_domain_idx": {
-          "name": "lessons_domain_idx",
+        "lessons_source_idx": {
+          "name": "lessons_source_idx",
           "columns": [
-            "domain"
+            "source"
           ],
           "isUnique": false
         },
-        "lessons_type_idx": {
-          "name": "lessons_type_idx",
+        "lessons_created_at_idx": {
+          "name": "lessons_created_at_idx",
           "columns": [
-            "type"
+            "created_at"
           ],
           "isUnique": false
         }
@@ -271,33 +208,39 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "serial",
+          "type": "varchar(64)",
           "primaryKey": true,
           "notNull": true
         },
-        "activity": {
-          "name": "activity",
+        "idea_id": {
+          "name": "idea_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tool_name": {
+          "name": "tool_name",
           "type": "varchar(128)",
           "primaryKey": false,
           "notNull": true
         },
-        "expected": {
-          "name": "expected",
-          "type": "jsonb",
+        "expected_outcome": {
+          "name": "expected_outcome",
+          "type": "varchar(32)",
           "primaryKey": false,
           "notNull": true
         },
-        "actual": {
-          "name": "actual",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "confidence": {
           "name": "confidence",
-          "type": "integer",
+          "type": "real",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
+        },
+        "rationale": {
+          "name": "rationale",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
         },
         "created_at": {
           "name": "created_at",
@@ -305,9 +248,30 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "predictions_tool_name_idx": {
+          "name": "predictions_tool_name_idx",
+          "columns": [
+            "tool_name"
+          ],
+          "isUnique": false
+        },
+        "predictions_idea_id_idx": {
+          "name": "predictions_idea_id_idx",
+          "columns": [
+            "idea_id"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
@@ -316,8 +280,8 @@
       "name": "tools",
       "schema": "",
       "columns": {
-        "name": {
-          "name": "name",
+        "tool_ref": {
+          "name": "tool_ref",
           "type": "varchar(128)",
           "primaryKey": true,
           "notNull": true
