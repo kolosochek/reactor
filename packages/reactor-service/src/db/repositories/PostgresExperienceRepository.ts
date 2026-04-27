@@ -3,7 +3,7 @@
 // Implements ExperienceRepository SPI on top of the experience table.
 // Schema is 1:1 with the SPI shape; service-side extensions live in metadata.
 
-import { eq, desc, and, gte, type SQL } from 'drizzle-orm';
+import { eq, desc, and, gte, sql, type SQL } from 'drizzle-orm';
 import { experience } from '../schema.js';
 import type { ReactorDb } from '../client.js';
 import type {
@@ -20,12 +20,12 @@ export class PostgresExperienceRepository implements ExperienceRepository {
     await this.db.insert(experience).values({
       id: rec.id,
       toolName: rec.toolName,
-      input: rec.input,
-      output: rec.output,
+      input: sql`${rec.input}`,
+      output: sql`${rec.output}`,
       outcome: rec.outcome,
       durationMs: rec.durationMs,
       createdAt: new Date(rec.createdAt),
-      metadata: rec.metadata ?? null,
+      metadata: rec.metadata !== undefined && rec.metadata !== null ? sql`${rec.metadata}` : null,
     });
   }
 
