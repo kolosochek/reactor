@@ -1,5 +1,5 @@
 // packages/text-tools/src/index.ts
-// Public surface for @reactor/text-tools.
+// Public surface for @dkolosovsky/reactor-text-tools.
 
 // Adapter + assembly
 export { textToolsAdapter } from './adapter.js';

@@ -18,12 +18,20 @@ Prior planned sub-projects 4.2 / 4.3 / 4.4 (Chrome extension migration / hh.ru C
 
 | Package | Version | Description |
 |---|---|---|
-| [`@reactor/service`](./packages/reactor-service) | `0.1.0` | HTTP microservice (Fastify 5 + Drizzle ORM + PostgreSQL). Hosts Reactor + 5 SPI repositories. |
-| [`@reactor/client`](./packages/reactor-client) | `0.1.0` | Thin HTTP SDK. Browser- and Node-friendly. Reconstructs typed errors. |
-| [`@reactor/text-tools`](./packages/text-tools) | `0.1.0` | Service-internal Activity bundle: `generateCoverLetter`, `scoreVacancy`, `answerQuestions`. |
-| `@reactor/docs` | `deferred` | Documentation site (Vike + vite-plugin-markdown). Not yet bootstrapped. |
+| [`@dkolosovsky/reactor-service`](./packages/reactor-service) | `0.1.0` | HTTP microservice (Fastify 5 + Drizzle ORM + PostgreSQL). Hosts Reactor + 5 SPI repositories. |
+| [`@dkolosovsky/reactor-client`](./packages/reactor-client) | `0.1.0` | Thin HTTP SDK. Browser- and Node-friendly. Reconstructs typed errors. |
+| [`@dkolosovsky/reactor-text-tools`](./packages/text-tools) | `0.1.0` | Service-internal Activity bundle: `generateCoverLetter`, `scoreVacancy`, `answerQuestions`. |
+| `@dkolosovsky/reactor-docs` | `deferred` | Documentation site (Vike + vite-plugin-markdown). Not yet bootstrapped. |
 
 External dependency: [`@kolosochek/reactor-core`](https://github.com/kolosochek/reactor-core) `>= 0.2.0` (sibling repo at `../ereal/reactor-core` via `file:` link in this monorepo).
+
+Published on npm:
+- [`@dkolosovsky/reactor-client`](https://www.npmjs.com/package/@dkolosovsky/reactor-client) `0.1.0`
+- [`@dkolosovsky/reactor-text-tools`](https://www.npmjs.com/package/@dkolosovsky/reactor-text-tools) `0.1.0`
+
+```bash
+npm install @dkolosovsky/reactor-client
+```
 
 ## Concept
 
@@ -41,8 +49,8 @@ Built-in invariants (subset of pokeroid's 9): Idea is immutable on the wire (#1)
 ```mermaid
 flowchart LR
     Consumer["Consumer<br/>(extension / CLI / future apps)"]
-    Client["@reactor/client<br/>ReactorClient.execute(idea, opts)"]
-    Service["@reactor/service<br/>POST /reactor/execute"]
+    Client["@dkolosovsky/reactor-client<br/>ReactorClient.execute(idea, opts)"]
+    Service["@dkolosovsky/reactor-service<br/>POST /reactor/execute"]
     Reactor["per-request Reactor<br/>Reactor.create({llm}).use(textToolsAdapter)"]
     LLM["LLM (consumer-provided<br/>via providerConfig)"]
     PG[("PostgreSQL<br/>experience / lessons / ideas /<br/>predictions / tools")]
@@ -87,7 +95,7 @@ curl http://localhost:3030/reactor/health
 End-to-end via the SDK:
 
 ```ts
-import { ReactorClient, buildCoverLetterIdea } from '@reactor/client';
+import { ReactorClient, buildCoverLetterIdea } from '@dkolosovsky/reactor-client';
 
 const client = new ReactorClient({ baseUrl: 'http://localhost:3030' });
 
@@ -206,15 +214,15 @@ reactor/
 
 | Workspace | Test files | Tests | Notes |
 |---|---|---|---|
-| `@reactor/service` | 11 | 48 | 27 unit + 21 testcontainer integration |
-| `@reactor/client` | 3 | 10 | All unit; `vi.fn()` fetchImpl injection |
-| `@reactor/text-tools` | 15 | 80 | All unit |
+| `@dkolosovsky/reactor-service` | 11 | 48 | 27 unit + 21 testcontainer integration |
+| `@dkolosovsky/reactor-client` | 3 | 10 | All unit; `vi.fn()` fetchImpl injection |
+| `@dkolosovsky/reactor-text-tools` | 15 | 80 | All unit |
 | **Total** | **29** | **138** | tsc clean across all three packages |
 
 ```bash
 npm test                                   # all workspaces
-npm test -w @reactor/service               # service only
-npm test -w @reactor/client                # client only
+npm test -w @dkolosovsky/reactor-service               # service only
+npm test -w @dkolosovsky/reactor-client                # client only
 ```
 
 Integration tests use isolated `postgres:16-alpine` containers via `testcontainers-node`. First run takes 30-60 seconds for image pull + container startup; subsequent runs reuse the image.
@@ -244,17 +252,17 @@ Per-workspace commands:
 
 ```bash
 # typecheck only (no emit)
-npm run typecheck -w @reactor/service
-npm run typecheck -w @reactor/client
-npm run typecheck -w @reactor/text-tools
+npm run typecheck -w @dkolosovsky/reactor-service
+npm run typecheck -w @dkolosovsky/reactor-client
+npm run typecheck -w @dkolosovsky/reactor-text-tools
 
 # build (emits dist/)
-npm run build -w @reactor/service
-npm run build -w @reactor/client
-npm run build -w @reactor/text-tools
+npm run build -w @dkolosovsky/reactor-service
+npm run build -w @dkolosovsky/reactor-client
+npm run build -w @dkolosovsky/reactor-text-tools
 
 # vitest watch mode
-npm run test:watch -w @reactor/service
+npm run test:watch -w @dkolosovsky/reactor-service
 ```
 
 Root-level shortcuts:
@@ -270,7 +278,7 @@ npm run service:start                      tsx packages/reactor-service/src/star
 ## Future work
 
 - **Sub-project 4.5**: crystallization tables wiring. Adds `lesson_compositions`, `prediction_for_idea`, `crystallization_runs`, etc., and wires the `composeActivity` seam in text-tools so Lessons read from PG can gate or augment Activity execution.
-- **`@reactor/docs`** scaffold: documentation site mirroring the pokeroid Vite + vite-plugin-markdown stack. Spec in `docs/specs/`. Triggers when documentation surface is non-trivial.
+- **`@dkolosovsky/reactor-docs`** scaffold: documentation site mirroring the pokeroid Vite + vite-plugin-markdown stack. Spec in `docs/specs/`. Triggers when documentation surface is non-trivial.
 
 Anticipated architectural shifts not yet active are captured in [`EVOLUTION.md`](./EVOLUTION.md), each with an explicit triggering event.
 

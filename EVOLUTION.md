@@ -14,7 +14,7 @@ Entries are not TODOs. They are landmines flagged for future readers so that whe
 
 ### Status
 
-🟡 **Deferred.** Not needed for v0.1.0 of `@reactor/service` (text-only Idea transformers: score / cover-letter / questions). Will become required when the Reactor service receives a Tool whose Idea includes structured visual/spatial data.
+🟡 **Deferred.** Not needed for v0.1.0 of `@dkolosovsky/reactor-service` (text-only Idea transformers: score / cover-letter / questions). Will become required when the Reactor service receives a Tool whose Idea includes structured visual/spatial data.
 
 ### Pokeroid canon
 
@@ -57,7 +57,7 @@ type Region =
 ```
 
 Integration shape:
-- Add a `RegionsMessage` type to `@reactor/text-tools` (or a new `@reactor/visual-tools` package if scope grows).
+- Add a `RegionsMessage` type to `@dkolosovsky/reactor-text-tools` (or a new `@dkolosovsky/reactor-visual-tools` package if scope grows).
 - Idea Context can carry `RegionsMessage` alongside existing `DataMessage` / `InputMessage` / `PlanMessage`.
 - Activities that consume Regions accept `regions: Region[]` as a tool parameter; LLM sees them rendered in a stable normalized form.
 - `box_2d` math (normalized → absolute pixels) is consumer-side, not service-side.

@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `@reactor/service` 0.1.0 (HTTP server + PostgreSQL persistence via Docker) and `@reactor/client` 0.1.0 (thin HTTP SDK) so consumers (extension in 4.2, hh.ru CLI in 4.3) can dispatch Idea triplets to a single canonical Reactor microservice instead of embedding `@kolosochek/reactor-core` directly.
+**Goal:** Ship `@dkolosovsky/reactor-service` 0.1.0 (HTTP server + PostgreSQL persistence via Docker) and `@dkolosovsky/reactor-client` 0.1.0 (thin HTTP SDK) so consumers (extension in 4.2, hh.ru CLI in 4.3) can dispatch Idea triplets to a single canonical Reactor microservice instead of embedding `@kolosochek/reactor-core` directly.
 
 **Architecture:** Per pokeroid `runtime/REACTOR.md:80-86`, Reactor is a microservice. Service hosts `Reactor.create({ llm }).use(textToolsAdapter, ...repositories)` in-process; persists 5 SPI repos to PostgreSQL via Drizzle (`postgres-js` driver); accepts `POST /reactor/execute { idea, providerConfig }`; constructs a transient `LLMProvider` from `providerConfig` per request (so consumers pass their own API keys). Postgres runs in a Docker container via `docker-compose.yml`. Tests use `testcontainers-node` for real-Postgres integration coverage; mock LLM for activity tests; `mock-fetch` for client tests.
 
-**Tech Stack:** TypeScript (workspaces), Fastify 5 (HTTP), Drizzle ORM + drizzle-kit + postgres-js (DB), PostgreSQL 16 (Docker), Zod (validation), pino (logging via Fastify), vitest + testcontainers-node (tests), `@kolosochek/reactor-core` 0.2.0 + `@reactor/text-tools` 0.1.0 (service-internal deps).
+**Tech Stack:** TypeScript (workspaces), Fastify 5 (HTTP), Drizzle ORM + drizzle-kit + postgres-js (DB), PostgreSQL 16 (Docker), Zod (validation), pino (logging via Fastify), vitest + testcontainers-node (tests), `@kolosochek/reactor-core` 0.2.0 + `@dkolosovsky/reactor-text-tools` 0.1.0 (service-internal deps).
 
 **Source spec:** `docs/superpowers/specs/2026-04-26-reactor-service-design.md` (commit `6dba91e`).
 
@@ -19,7 +19,7 @@
 3. Per-request Reactor: each `POST /reactor/execute` builds a fresh `Reactor.create({ llm: buildLLMProvider(req.providerConfig) })` instance. No reactor-core SPI extension needed (chooses spec Open Question #2 in favor of "request-scoped Reactor", deferring `opts.llmOverride` until perf evidence demands it).
 4. v0.1.0 ships **`openrouter` provider only** in `buildLLMProvider`; other providers (cerebras, groq, deepseek, openai, xai) throw `ProviderNotImplementedError` and land in a follow-up. This bounds the foundation work; consumers in 4.2/4.3 already use openrouter.
 5. Both packages live in hhru workspace (`packages/reactor-service/`, `packages/reactor-client/`).
-6. Package namespace `@reactor/...` (matches text-tools 4.1 convention; promotion to npm deferred).
+6. Package namespace `@dkolosovsky/reactor-*` (matches text-tools 4.1 convention; promotion to npm deferred).
 7. Default Postgres port 5433 (avoids common 5432 conflict); all values via `.env`.
 8. Permissive CORS in v0.1.0 (`origin: '*'`) since service is localhost-only and Chrome extension callers need it. Auth is post-MVP per spec non-goals.
 
@@ -150,12 +150,12 @@ In `/Users/noone/data/reactor/package.json`, add to the `"scripts"` object:
 ```json
 "reactor:db:up": "docker compose up -d reactor-postgres",
 "reactor:db:down": "docker compose down reactor-postgres",
-"reactor:db:generate": "npm run db:generate -w @reactor/service",
-"reactor:db:migrate": "npm run db:migrate -w @reactor/service",
-"reactor:start": "npm run start -w @reactor/service"
+"reactor:db:generate": "npm run db:generate -w @dkolosovsky/reactor-service",
+"reactor:db:migrate": "npm run db:migrate -w @dkolosovsky/reactor-service",
+"reactor:start": "npm run start -w @dkolosovsky/reactor-service"
 ```
 
-The `-w @reactor/service` flag delegates to that workspace's own scripts (defined in T2). Keep alphabetical ordering with existing scripts.
+The `-w @dkolosovsky/reactor-service` flag delegates to that workspace's own scripts (defined in T2). Keep alphabetical ordering with existing scripts.
 
 - [ ] **Step 3: Verify root file is still valid JSON**
 
@@ -283,7 +283,7 @@ git commit -m "feat(infra): docker-compose for reactor-postgres + .env.example"
 
 ```json
 {
-  "name": "@reactor/service",
+  "name": "@dkolosovsky/reactor-service",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -306,7 +306,7 @@ git commit -m "feat(infra): docker-compose for reactor-postgres + .env.example"
   },
   "dependencies": {
     "@kolosochek/reactor-core": "file:../../../ereal/reactor-core",
-    "@reactor/text-tools": "file:../text-tools",
+    "@dkolosovsky/reactor-text-tools": "file:../text-tools",
     "drizzle-orm": "^0.30.0",
     "postgres": "^3.4.0",
     "fastify": "^5.0.0",
@@ -424,7 +424,7 @@ cd /Users/noone/data/reactor
 npm install
 ```
 
-Picks up the new workspace; resolves `@kolosochek/reactor-core` from `file:../../../ereal/reactor-core`, `@reactor/text-tools` from `file:../text-tools`. Expected: no errors. If `testcontainers` install hangs, verify Docker is in PATH (it pulls a Docker reaper image as part of postinstall).
+Picks up the new workspace; resolves `@kolosochek/reactor-core` from `file:../../../ereal/reactor-core`, `@dkolosovsky/reactor-text-tools` from `file:../text-tools`. Expected: no errors. If `testcontainers` install hangs, verify Docker is in PATH (it pulls a Docker reaper image as part of postinstall).
 
 - [ ] **Step 9: Smoke + typecheck**
 
@@ -448,7 +448,7 @@ git add packages/reactor-service/package.json \
         packages/reactor-service/src/index.ts \
         packages/reactor-service/src/__tests__/smoke.test.ts \
         package-lock.json
-git commit -m "feat(reactor-service): bootstrap @reactor/service 0.1.0 workspace"
+git commit -m "feat(reactor-service): bootstrap @dkolosovsky/reactor-service 0.1.0 workspace"
 ```
 
 ---
@@ -1596,7 +1596,7 @@ export interface ProviderConfig {
 
 export class ProviderNotImplementedError extends Error {
   constructor(public readonly provider: string) {
-    super(`Provider "${provider}" is not implemented in @reactor/service 0.1.0`);
+    super(`Provider "${provider}" is not implemented in @dkolosovsky/reactor-service 0.1.0`);
     this.name = 'ProviderNotImplementedError';
   }
 }
@@ -1653,7 +1653,7 @@ Create `src/reactor/buildReactor.ts`:
 // reactor-core to gain opts.llmOverride SPI.
 
 import { Reactor } from '@kolosochek/reactor-core';
-import { textToolsAdapter } from '@reactor/text-tools';
+import { textToolsAdapter } from '@dkolosovsky/reactor-text-tools';
 import type { LLMProvider, RepositoriesProvider } from '@kolosochek/reactor-core';
 
 export function buildReactor(llm: LLMProvider, repositories: RepositoriesProvider): Reactor {
@@ -1701,7 +1701,7 @@ import {
   LLMNetworkError,
   LLMOutputParseError,
   ActivityCancelledError,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 
 describe('mapErrorToResponse', () => {
   it('IdeaSchemaError -> 400', () => {
@@ -1775,7 +1775,7 @@ import {
   LLMNetworkError,
   LLMOutputParseError,
   ActivityCancelledError,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 
 export interface ErrorResponseBody {
   error: {
@@ -1922,7 +1922,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { startTestPostgres, truncateAll, type TestContainerHandle } from './_helpers/testcontainerSetup.js';
 import { createRepositoriesProvider } from '../db/repositories/index.js';
 import { buildServer } from '../server.js';
-import { buildCoverLetterIdea } from '@reactor/text-tools';
+import { buildCoverLetterIdea } from '@dkolosovsky/reactor-text-tools';
 
 let h: TestContainerHandle;
 
@@ -2363,7 +2363,7 @@ Replace existing stub `src/index.ts`:
 ```ts
 // packages/reactor-service/src/index.ts
 //
-// Public exports for @reactor/service. Used by E2E tests and any embedding
+// Public exports for @dkolosovsky/reactor-service. Used by E2E tests and any embedding
 // that wants to construct the server programmatically.
 
 export { buildServer } from './server.js';
@@ -2417,7 +2417,7 @@ git add packages/reactor-service/src/start.ts \
 git commit -m "feat(reactor-service): start.ts boot + public exports"
 ```
 
-After this commit, `@reactor/service` is functionally complete. Tasks T15+ ship the client SDK and tests.
+After this commit, `@dkolosovsky/reactor-service` is functionally complete. Tasks T15+ ship the client SDK and tests.
 
 ---
 
@@ -2438,7 +2438,7 @@ After this commit, `@reactor/service` is functionally complete. Tasks T15+ ship 
 
 ```json
 {
-  "name": "@reactor/client",
+  "name": "@dkolosovsky/reactor-client",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -2457,7 +2457,7 @@ After this commit, `@reactor/service` is functionally complete. Tasks T15+ ship 
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@reactor/text-tools": "file:../text-tools"
+    "@dkolosovsky/reactor-text-tools": "file:../text-tools"
   },
   "devDependencies": {
     "@kolosochek/reactor-core": "file:../../../ereal/reactor-core",
@@ -2468,7 +2468,7 @@ After this commit, `@reactor/service` is functionally complete. Tasks T15+ ship 
 }
 ```
 
-`@kolosochek/reactor-core` is a **devDependency** (type-only at runtime). `@reactor/text-tools` is a runtime dep because we re-export builders.
+`@kolosochek/reactor-core` is a **devDependency** (type-only at runtime). `@dkolosovsky/reactor-text-tools` is a runtime dep because we re-export builders.
 
 - [ ] **Step 2: Create `tsconfig.json`**
 
@@ -2580,7 +2580,7 @@ git add packages/reactor-client/package.json \
         packages/reactor-client/src/index.ts \
         packages/reactor-client/src/__tests__/smoke.test.ts \
         package-lock.json
-git commit -m "feat(reactor-client): bootstrap @reactor/client 0.1.0 workspace"
+git commit -m "feat(reactor-client): bootstrap @dkolosovsky/reactor-client 0.1.0 workspace"
 ```
 
 ---
@@ -2655,7 +2655,7 @@ Create `src/__tests__/ReactorClient.errors.test.ts`:
 import { describe, it, expect, vi } from 'vitest';
 import { ReactorClient } from '../ReactorClient.js';
 import { ReactorClientError } from '../errors.js';
-import { LLMQuotaError, LLMTimeoutError, IdeaSchemaError } from '@reactor/text-tools';
+import { LLMQuotaError, LLMTimeoutError, IdeaSchemaError } from '@dkolosovsky/reactor-text-tools';
 
 describe('ReactorClient error reconstruction', () => {
   it('reconstructs LLMQuotaError from 429', async () => {
@@ -2772,7 +2772,7 @@ export {
   LLMNetworkError,
   LLMOutputParseError,
   ActivityCancelledError,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 ```
 
 - [ ] **Step 5: Implement `ReactorClient.ts`**
@@ -2788,7 +2788,7 @@ import {
   LLMNetworkError,
   LLMOutputParseError,
   ActivityCancelledError,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 import type { Idea, Solution } from '@kolosochek/reactor-core';
 import { ReactorClientError } from './errors.js';
 
@@ -2880,7 +2880,7 @@ Replace `src/index.ts`:
 
 ```ts
 // packages/reactor-client/src/index.ts
-// Public exports for @reactor/client.
+// Public exports for @dkolosovsky/reactor-client.
 
 export { ReactorClient } from './ReactorClient.js';
 export type { ReactorClientOptions, ProviderConfig, ExecuteOptions } from './ReactorClient.js';
@@ -2904,7 +2904,7 @@ export {
   CoverLetterInput,
   ScoreInput,
   QuestionsInput,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 export type {
   CoverLetterInputT,
   CoverLetterSolutionT,
@@ -2912,7 +2912,7 @@ export type {
   ScoreSolutionT,
   QuestionsInputT,
   QuestionsSolutionT,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 ```
 
 - [ ] **Step 7: Run tests, expect PASS**
@@ -2968,7 +2968,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { startTestPostgres, truncateAll, type TestContainerHandle } from './_helpers/testcontainerSetup.js';
 import { createRepositoriesProvider } from '../db/repositories/index.js';
 import { buildServer } from '../server.js';
-import { ReactorClient, buildCoverLetterIdea } from '@reactor/client';
+import { ReactorClient, buildCoverLetterIdea } from '@dkolosovsky/reactor-client';
 import type { FastifyInstance } from 'fastify';
 
 let h: TestContainerHandle;
@@ -3041,7 +3041,7 @@ Expected: 1/1 PASS. (Container start adds ~30s.)
 - [ ] **Step 3: Create `packages/reactor-service/README.md`**
 
 ```markdown
-# @reactor/service
+# @dkolosovsky/reactor-service
 
 HTTP microservice that hosts the Reactor instance and persists Idea/Experience/Lessons/Predictions/Tools to PostgreSQL via Drizzle. Consumers (Chrome extension, hh.ru CLI, future pokeroid/ereal) call `POST /reactor/execute` with an Idea triplet and provider config; the service constructs a request-scoped Reactor with their LLM credentials, runs the Activity, persists the ExperienceRecord, and returns the Solution.
 
@@ -3098,7 +3098,7 @@ Runs vitest. Integration tests use `testcontainers-node` to spin up isolated Pos
 ```markdown
 # Changelog
 
-All notable changes to `@reactor/service`.
+All notable changes to `@dkolosovsky/reactor-service`.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -3123,7 +3123,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Requirements
 
 - `@kolosochek/reactor-core` >= 0.2.0
-- `@reactor/text-tools` >= 0.1.0
+- `@dkolosovsky/reactor-text-tools` >= 0.1.0
 - Docker (for postgres container)
 - Node 20+
 ```
@@ -3131,9 +3131,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - [ ] **Step 5: Create `packages/reactor-client/README.md`**
 
 ```markdown
-# @reactor/client
+# @dkolosovsky/reactor-client
 
-Thin HTTP SDK for `@reactor/service`. Consumers (Chrome extension, hh.ru CLI scripts, future apps) build Idea triplets locally and dispatch them to a running Reactor service via this client. Browser-friendly (Chrome MV3) and Node-friendly (CLI).
+Thin HTTP SDK for `@dkolosovsky/reactor-service`. Consumers (Chrome extension, hh.ru CLI scripts, future apps) build Idea triplets locally and dispatch them to a running Reactor service via this client. Browser-friendly (Chrome MV3) and Node-friendly (CLI).
 
 ## Status
 
@@ -3142,7 +3142,7 @@ Thin HTTP SDK for `@reactor/service`. Consumers (Chrome extension, hh.ru CLI scr
 ## Usage
 
 ```ts
-import { ReactorClient, buildCoverLetterIdea } from '@reactor/client';
+import { ReactorClient, buildCoverLetterIdea } from '@dkolosovsky/reactor-client';
 
 const client = new ReactorClient({ baseUrl: 'http://localhost:3030' });
 
@@ -3169,7 +3169,7 @@ The same pattern works for `buildScoreIdea` (returns `{ score, reasoning, skillM
 Activity errors come through as typed `TextToolsError` subclasses (LLMQuotaError, LLMTimeoutError, etc.) reconstructed from the service response. HTTP-level issues (network failure, malformed response) throw `ReactorClientError`.
 
 ```ts
-import { LLMQuotaError, ReactorClientError } from '@reactor/client';
+import { LLMQuotaError, ReactorClientError } from '@dkolosovsky/reactor-client';
 
 try {
   const sol = await client.execute(idea, { providerConfig });
@@ -3195,7 +3195,7 @@ try {
 ```markdown
 # Changelog
 
-All notable changes to `@reactor/client`.
+All notable changes to `@dkolosovsky/reactor-client`.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -3203,16 +3203,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- ReactorClient class - HTTP client over `@reactor/service`. Pure fetch-based; browser- and Node-friendly.
+- ReactorClient class - HTTP client over `@dkolosovsky/reactor-service`. Pure fetch-based; browser- and Node-friendly.
 - execute(idea, opts) method - POSTs to /reactor/execute; returns Solution; reconstructs typed TextToolsError from service error response.
 - ReactorClientError - parent for HTTP-level issues (network, malformed response).
-- Re-exports buildCoverLetterIdea, buildScoreIdea, buildQuestionsIdea from @reactor/text-tools so consumers don't need a direct dep.
+- Re-exports buildCoverLetterIdea, buildScoreIdea, buildQuestionsIdea from @dkolosovsky/reactor-text-tools so consumers don't need a direct dep.
 - Re-exports TextToolsError hierarchy for typed catch.
 - Type-only dep on @kolosochek/reactor-core (Idea, Solution shapes); zero runtime cost.
 
 ### Requirements
 
-- `@reactor/text-tools` >= 0.1.0
+- `@dkolosovsky/reactor-text-tools` >= 0.1.0
 - Type-only `@kolosochek/reactor-core` >= 0.2.0
 ```
 
@@ -3271,7 +3271,7 @@ git add packages/reactor-service/src/__tests__/e2e.test.ts \
 git commit -m "test(reactor-service): e2e round-trip; docs(reactor-{service,client}): README + CHANGELOG 0.1.0"
 ```
 
-After this commit, sub-project 4.0 is **complete**. `@reactor/service` and `@reactor/client` are ready to be consumed by 4.2 (extension migration) and 4.3 (hh.ru CLI migration).
+After this commit, sub-project 4.0 is **complete**. `@dkolosovsky/reactor-service` and `@dkolosovsky/reactor-client` are ready to be consumed by 4.2 (extension migration) and 4.3 (hh.ru CLI migration).
 
 ---
 
@@ -3283,7 +3283,7 @@ After this commit, sub-project 4.0 is **complete**. `@reactor/service` and `@rea
 - [ ] `curl POST http://localhost:3030/reactor/execute` with `{ idea: buildCoverLetterIdea(...), providerConfig: { provider: 'openrouter', ... } }` and a real OpenRouter key returns a valid Solution JSON.
 - [ ] `curl GET http://localhost:3030/reactor/experience?toolName=generateCoverLetter` returns the persisted record from the previous step.
 - [ ] `ReactorClient` instance correctly constructs requests, parses successful responses, and throws typed TextToolsError subclasses on error responses.
-- [ ] All builders (`buildCoverLetterIdea`, `buildScoreIdea`, `buildQuestionsIdea`) re-exported from `@reactor/client`.
+- [ ] All builders (`buildCoverLetterIdea`, `buildScoreIdea`, `buildQuestionsIdea`) re-exported from `@dkolosovsky/reactor-client`.
 - [ ] Test suite passes: ~37 tests in service (testcontainers Postgres + mock LLM + fetch mocks); 8 tests in client (mock fetch).
 - [ ] `.env.example` documents all required env vars.
 - [ ] `docker-compose.yml` validates (`docker compose config --quiet`).

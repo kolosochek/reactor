@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 import { startTestPostgres, truncateAll, type TestContainerHandle } from './_helpers/testcontainerSetup.js';
 import { createRepositoriesProvider } from '../db/repositories/index.js';
 import { buildServer } from '../server.js';
-import { buildCoverLetterIdea } from '@reactor/text-tools';
+import { buildCoverLetterIdea } from '@dkolosovsky/reactor-text-tools';
 
 vi.mock('../reactor/llmFromConfig.js', () => ({
   buildLLMProvider: () => ({

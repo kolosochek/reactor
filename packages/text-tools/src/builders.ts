@@ -1,7 +1,7 @@
 // packages/text-tools/src/builders.ts
 
 import { z } from 'zod';
-import { createMeta } from '@kolosochek/reactor-core';
+import { createMeta } from './lib/createMeta.js';
 import type { Idea, MetaMessage, DataMessage } from '@kolosochek/reactor-core';
 import { CoverLetterInput } from './tools/coverLetter.js';
 import { ScoreInput } from './tools/score.js';

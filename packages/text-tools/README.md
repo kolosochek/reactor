@@ -1,4 +1,4 @@
-# @reactor/text-tools
+# @dkolosovsky/reactor-text-tools
 
 Platform-agnostic text-LLM domain adapter on top of `@kolosochek/reactor-core`.
 
@@ -17,7 +17,7 @@ import {
   buildCoverLetterIdea,
   buildScoreIdea,
   buildQuestionsIdea,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 
 const reactor = Reactor.create({ llm: createOpenRouter({ apiKey: '...' }) });
 reactor.use({ ...textToolsAdapter, repositories: new InMemoryRepositories() });
@@ -49,7 +49,7 @@ The package exports a `test-utils` subpath for consumers:
 import {
   createMockLLMProvider,
   runLLMProviderContractTests,
-} from '@reactor/text-tools/test-utils';
+} from '@dkolosovsky/reactor-text-tools/test-utils';
 import { describe } from 'vitest';
 
 // Mock LLM for unit tests:

@@ -8,7 +8,7 @@ import {
   LLMNetworkError,
   LLMOutputParseError,
   ActivityCancelledError,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 
 describe('mapErrorToResponse', () => {
   it('IdeaSchemaError -> 400', () => {

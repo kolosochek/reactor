@@ -4,7 +4,7 @@
 // claims to satisfy the SPI should pass these tests. Per spec section 6.3.
 //
 // Usage:
-//   import { runLLMProviderContractTests } from '@reactor/text-tools/test-utils';
+//   import { runLLMProviderContractTests } from '@dkolosovsky/reactor-text-tools/test-utils';
 //   import { describe } from 'vitest';
 //   runLLMProviderContractTests(describe, () => myLLMProviderFactory());
 

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `@reactor/service`.
+All notable changes to `@dkolosovsky/reactor-service`.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -25,6 +25,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Requirements
 
 - `@kolosochek/reactor-core` >= 0.2.0
-- `@reactor/text-tools` >= 0.1.0
+- `@dkolosovsky/reactor-text-tools` >= 0.1.0
 - Docker (for Postgres container)
 - Node 20+

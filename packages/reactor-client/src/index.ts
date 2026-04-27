@@ -1,6 +1,6 @@
 // packages/reactor-client/src/index.ts
 //
-// Public exports for @reactor/client.
+// Public exports for @dkolosovsky/reactor-client.
 
 export { ReactorClient } from './ReactorClient.js';
 export type { ReactorClientOptions, ProviderConfig, ExecuteOptions } from './ReactorClient.js';
@@ -23,7 +23,7 @@ export {
   CoverLetterInput,
   ScoreInput,
   QuestionsInput,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 export type {
   CoverLetterInputT,
   CoverLetterSolutionT,
@@ -31,4 +31,4 @@ export type {
   ScoreSolutionT,
   QuestionsInputT,
   QuestionsSolutionT,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';

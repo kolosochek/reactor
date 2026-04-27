@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Idea } from '@kolosochek/reactor-core';
 import { ReactorClient } from '../ReactorClient.js';
 import { ReactorClientError } from '../errors.js';
-import { LLMQuotaError, LLMTimeoutError, IdeaSchemaError } from '@reactor/text-tools';
+import { LLMQuotaError, LLMTimeoutError, IdeaSchemaError } from '@dkolosovsky/reactor-text-tools';
 
 const idea = { schema: { type: 'object' }, context: [], solution: null } satisfies Idea;
 const providerConfig = { provider: 'openrouter' as const, model: 'm', apiKey: 'k' };

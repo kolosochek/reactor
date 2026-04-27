@@ -1,6 +1,6 @@
 // packages/reactor-service/src/index.ts
 //
-// Public exports for @reactor/service. Used by E2E tests and any embedding
+// Public exports for @dkolosovsky/reactor-service. Used by E2E tests and any embedding
 // that wants to construct the server programmatically.
 
 export { buildServer } from './server.js';

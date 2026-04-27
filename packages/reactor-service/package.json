@@ -1,5 +1,5 @@
 {
-  "name": "@reactor/service",
+  "name": "@dkolosovsky/reactor-service",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@kolosochek/reactor-core": "file:../../../ereal/reactor-core",
-    "@reactor/text-tools": "file:../text-tools",
+    "@dkolosovsky/reactor-text-tools": "file:../text-tools",
     "drizzle-orm": "^0.30.0",
     "postgres": "^3.4.0",
     "fastify": "^5.0.0",

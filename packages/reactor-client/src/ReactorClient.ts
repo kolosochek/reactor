@@ -1,6 +1,6 @@
 // packages/reactor-client/src/ReactorClient.ts
 //
-// HTTP client for @reactor/service. Pure fetch-based; works in both browser
+// HTTP client for @dkolosovsky/reactor-service. Pure fetch-based; works in both browser
 // (Chrome MV3 service worker) and Node. Reconstructs typed TextToolsError
 // subclasses from { error: { class, ... } } bodies so consumer try/catch
 // behaves the same as if Reactor were embedded.
@@ -13,7 +13,7 @@ import {
   LLMNetworkError,
   LLMOutputParseError,
   ActivityCancelledError,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 import type { Idea, Solution } from '@kolosochek/reactor-core';
 import { ReactorClientError } from './errors.js';
 

@@ -12,8 +12,8 @@
     "build": "npm run build --workspaces --if-present",
     "db:up": "docker compose up -d reactor-postgres",
     "db:down": "docker compose down reactor-postgres",
-    "db:generate": "npm run db:generate -w @reactor/service",
-    "db:migrate": "npm run db:migrate -w @reactor/service",
-    "service:start": "npm run start -w @reactor/service"
+    "db:generate": "npm run db:generate -w @dkolosovsky/reactor-service",
+    "db:migrate": "npm run db:migrate -w @dkolosovsky/reactor-service",
+    "service:start": "npm run start -w @dkolosovsky/reactor-service"
   }
 }

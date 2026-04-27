@@ -6,7 +6,7 @@
 // changing reactor-core 0.2.0 (Decision #8).
 
 import { Reactor } from '@kolosochek/reactor-core';
-import { textToolsAdapter } from '@reactor/text-tools';
+import { textToolsAdapter } from '@dkolosovsky/reactor-text-tools';
 import type { LLMProvider, RepositoriesProvider } from '@kolosochek/reactor-core';
 
 export function buildReactor(llm: LLMProvider, repositories: RepositoriesProvider): Reactor {

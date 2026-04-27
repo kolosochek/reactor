@@ -18,7 +18,7 @@ export interface ProviderConfig {
 
 export class ProviderNotImplementedError extends Error {
   constructor(public readonly provider: string) {
-    super(`Provider "${provider}" is not implemented in @reactor/service 0.1.0`);
+    super(`Provider "${provider}" is not implemented in @dkolosovsky/reactor-service 0.1.0`);
     this.name = 'ProviderNotImplementedError';
   }
 }

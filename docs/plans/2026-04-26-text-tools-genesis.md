@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship `@reactor/text-tools` 0.1.0 — a platform-agnostic text-LLM domain adapter on `@kolosochek/reactor-core` that both the Chrome extension and the hh.ru reactor-adapter will consume in subsequent sub-projects (4.2, 4.3).
+**Goal:** Ship `@dkolosovsky/reactor-text-tools` 0.1.0 — a platform-agnostic text-LLM domain adapter on `@kolosochek/reactor-core` that both the Chrome extension and the hh.ru reactor-adapter will consume in subsequent sub-projects (4.2, 4.3).
 
 **Architecture:** Strict Idea-Triplet paradigm: every operation is `reactor.execute(idea)`, where the Idea carries a `MetaMessage` + `DataMessage._call`. text-tools provides 3 Activities (`generateCoverLetter`, `scoreVacancy`, `answerQuestions`), each composed via `composeActivity({ preCheck?, llmFallback, postValidate? })`. Today only `llmFallback` is wired; `preCheck`/`postValidate` are seams for future crystallization. Reactor-core gets a non-breaking 0.2.0 SPI patch so Activity context exposes `llm: LLMProvider`, `signal: AbortSignal | undefined`, and `onProgress` (which today are typed but unpopulated).
 
@@ -19,7 +19,7 @@
 3. Activity SPI extends with `ctx.llm: LLMProvider` (non-breaking).
 4. `Reactor.execute(idea, opts?)` gains opts param for `signal` + `onProgress`.
 5. `composeActivity({ preCheck?, llmFallback, postValidate? })` is the seam for future crystallization. Today every Activity uses only `llmFallback`.
-6. Package namespace `@reactor/text-tools` (tentative; Open Question #5 in spec).
+6. Package namespace `@dkolosovsky/reactor-text-tools` (tentative; Open Question #5 in spec).
 7. en + ru prompts. en is the primary at 0.1.0; ru is "best effort" port.
 
 ## File structure
@@ -623,7 +623,7 @@ After this commit, `@kolosochek/reactor-core` is at 0.2.0. Consumers using `file
 
 ```json
 {
-  "name": "@reactor/text-tools",
+  "name": "@dkolosovsky/reactor-text-tools",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -659,7 +659,7 @@ After this commit, `@kolosochek/reactor-core` is at 0.2.0. Consumers using `file
 }
 ```
 
-Mirror reactor-adapter's package.json field-for-field except for the `name`, the `./test-utils` export entry, and the dependency set. The `./test-utils` subpath is so the future plan 4.2 (extension) can do `import { createMockLLMProvider } from '@reactor/text-tools/test-utils'`.
+Mirror reactor-adapter's package.json field-for-field except for the `name`, the `./test-utils` export entry, and the dependency set. The `./test-utils` subpath is so the future plan 4.2 (extension) can do `import { createMockLLMProvider } from '@dkolosovsky/reactor-text-tools/test-utils'`.
 
 - [ ] **Step 2: Create `tsconfig.json`**
 
@@ -789,7 +789,7 @@ git add packages/text-tools/package.json \
         packages/text-tools/src/index.ts \
         packages/text-tools/src/__tests__/smoke.test.ts \
         package-lock.json
-git commit -m "feat(text-tools): bootstrap @reactor/text-tools 0.1.0 workspace"
+git commit -m "feat(text-tools): bootstrap @dkolosovsky/reactor-text-tools 0.1.0 workspace"
 ```
 
 If `package-lock.json` was modified by the `npm install` of step 8, include it. Do NOT include any other modified file.
@@ -2031,7 +2031,7 @@ Create `src/test-utils/contract.ts`:
 // claims to satisfy the SPI should pass these tests. Per spec section 6.3.
 //
 // Usage:
-//   import { runLLMProviderContractTests } from '@reactor/text-tools/test-utils';
+//   import { runLLMProviderContractTests } from '@dkolosovsky/reactor-text-tools/test-utils';
 //   import { describe } from 'vitest';
 //   runLLMProviderContractTests(describe, () => myLLMProviderFactory());
 
@@ -3015,7 +3015,7 @@ git commit -m "feat(text-tools): textToolsAdapter assembly"
 - Modify: `/Users/noone/data/reactor/packages/text-tools/src/index.ts`
 - Create: `/Users/noone/data/reactor/packages/text-tools/src/test-utils/index.ts`
 
-**Why:** Define what's importable from `@reactor/text-tools` and `@reactor/text-tools/test-utils`.
+**Why:** Define what's importable from `@dkolosovsky/reactor-text-tools` and `@dkolosovsky/reactor-text-tools/test-utils`.
 
 - [ ] **Step 1: Implement main barrel**
 
@@ -3023,7 +3023,7 @@ Replace the contents of `src/index.ts`:
 
 ```ts
 // packages/text-tools/src/index.ts
-// Public surface for @reactor/text-tools.
+// Public surface for @dkolosovsky/reactor-text-tools.
 
 // Adapter + assembly
 export { textToolsAdapter } from './adapter.js';
@@ -3104,7 +3104,7 @@ Create `src/test-utils/index.ts`:
 
 ```ts
 // packages/text-tools/src/test-utils/index.ts
-// Public surface for @reactor/text-tools/test-utils.
+// Public surface for @dkolosovsky/reactor-text-tools/test-utils.
 
 export { createMockLLMProvider } from './mockLLM.js';
 export type { CreateMockLLMProviderOptions } from './mockLLM.js';
@@ -3322,7 +3322,7 @@ git commit -m "test(text-tools): integration smoke - reactor.execute on each Ide
 - [ ] **Step 1: Create README.md**
 
 ```markdown
-# @reactor/text-tools
+# @dkolosovsky/reactor-text-tools
 
 Platform-agnostic text-LLM domain adapter on top of `@kolosochek/reactor-core`.
 
@@ -3341,7 +3341,7 @@ import {
   buildCoverLetterIdea,
   buildScoreIdea,
   buildQuestionsIdea,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';
 
 const reactor = Reactor.create({ llm: createOpenRouter({ apiKey: '...' }) });
 reactor.use({ ...textToolsAdapter, repositories: new InMemoryRepositories() });
@@ -3373,7 +3373,7 @@ The package exports a `test-utils` subpath for consumers:
 import {
   createMockLLMProvider,
   runLLMProviderContractTests,
-} from '@reactor/text-tools/test-utils';
+} from '@dkolosovsky/reactor-text-tools/test-utils';
 import { describe } from 'vitest';
 
 // Mock LLM for unit tests:
@@ -3411,7 +3411,7 @@ runLLMProviderContractTests(describe, () => myLLMProviderFactory());
 ```markdown
 # Changelog
 
-All notable changes to `@reactor/text-tools`.
+All notable changes to `@dkolosovsky/reactor-text-tools`.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
@@ -3419,7 +3419,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Initial public surface for `@reactor/text-tools`.
+- Initial public surface for `@dkolosovsky/reactor-text-tools`.
 - Three Activities: `generateCoverLetterActivity`, `scoreVacancyActivity`, `answerQuestionsActivity`. Each composed via `composeActivity({ llmFallback })` so future crystallization is a one-line addition.
 - Three Tool definitions with Zod input + Solution schemas: `CoverLetterTool`, `ScoreTool`, `QuestionsTool`.
 - Three Idea builders for direct-mode invocation: `buildCoverLetterIdea`, `buildScoreIdea`, `buildQuestionsIdea`. Each builder validates input via Zod and constructs an `Idea` with `MetaMessage` + `DataMessage._call`.
@@ -3427,7 +3427,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Default prompts (en + ru) for all three tools, ported from existing extension and hh.ru server prompts.
 - `composeActivity` factory — crystallization seam for future deterministic preCheck and postValidate layers.
 - `TextToolsError` typed hierarchy: `IdeaSchemaError`, `IdeaContextMissingError`, `LLMTimeoutError`, `LLMQuotaError`, `LLMNetworkError`, `LLMOutputParseError`, `ActivityCancelledError`.
-- `createMockLLMProvider` for unit tests; exported from `@reactor/text-tools/test-utils`.
+- `createMockLLMProvider` for unit tests; exported from `@dkolosovsky/reactor-text-tools/test-utils`.
 - `runLLMProviderContractTests` — vitest-compatible conformance suite that any LLMProvider implementation can run against itself.
 
 ### Requirements
@@ -3483,6 +3483,6 @@ After this commit, sub-project 4.1 is complete. text-tools is ready to be consum
 - [ ] All three Activities accept `vacancy: { title, description, url?, platform? }` shape. No `vacancyId` anywhere.
 - [ ] `composeActivity` exported and used by every Activity (only `llmFallback` layer wired today).
 - [ ] `runLLMProviderContractTests` runs and passes against `createMockLLMProvider`.
-- [ ] Public exports (`@reactor/text-tools` main + `/test-utils` subpath) documented in README.
+- [ ] Public exports (`@dkolosovsky/reactor-text-tools` main + `/test-utils` subpath) documented in README.
 - [ ] 80 tests passing in `packages/text-tools/`. 144 tests passing in `@kolosochek/reactor-core` (was 141; +3 from Task 3).
 - [ ] No Node-specific runtime imports in text-tools src (verified by grep at end of T22).

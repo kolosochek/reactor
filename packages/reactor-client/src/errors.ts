@@ -22,4 +22,4 @@ export {
   LLMNetworkError,
   LLMOutputParseError,
   ActivityCancelledError,
-} from '@reactor/text-tools';
+} from '@dkolosovsky/reactor-text-tools';

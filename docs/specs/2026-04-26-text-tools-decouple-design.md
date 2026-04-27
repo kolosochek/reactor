@@ -10,7 +10,7 @@
 
 The hh.ru pipeline is platform-coupled at every layer: every step takes a `vacancyId: number` (a hh.ru DB row id) and reaches into hh.ru's SQLite to read the vacancy text. The Chrome extension already has the *correct* shape - it operates on `vacancy: string` (any pasted text) - but its implementation is a parallel codebase, duplicating the LLM logic.
 
-This spec extracts the platform-agnostic LLM operations into a new package `@reactor/text-tools` that becomes the single source of truth. Both the Chrome extension and the hh.ru-specific reactor-adapter consume it. The package is built strictly on the **Idea Triplet** paradigm from pokeroid's Reactor vision: every operation is a self-contained `Idea = { schema, context, solution }` executed via `reactor.execute(idea)`. No partial states, no callback shortcuts, no platform leakage.
+This spec extracts the platform-agnostic LLM operations into a new package `@dkolosovsky/reactor-text-tools` that becomes the single source of truth. Both the Chrome extension and the hh.ru-specific reactor-adapter consume it. The package is built strictly on the **Idea Triplet** paradigm from pokeroid's Reactor vision: every operation is a self-contained `Idea = { schema, context, solution }` executed via `reactor.execute(idea)`. No partial states, no callback shortcuts, no platform leakage.
 
 **Decisions locked in this brainstorm:**
 - Approach B (extract shared `text-tools`, not refactor adapter in place)
@@ -76,7 +76,7 @@ graph TB
     AC["ActivityContext = { state, signal, onProgress, llm }"]
   end
 
-  subgraph tt["@reactor/text-tools 0.1.0 (NEW)"]
+  subgraph tt["@dkolosovsky/reactor-text-tools 0.1.0 (NEW)"]
     direction TB
     SCH["Schemas:<br/>CoverLetterSchema<br/>ScoreSchema<br/>QuestionsSchema"]
     BLD["Idea builders:<br/>buildCoverLetterIdea<br/>buildScoreIdea<br/>buildQuestionsIdea"]
@@ -513,7 +513,7 @@ Caller can override via `CoverLetterInput.prompt` field. Prompts are content; it
     │                                    (currently only "packages/*", + extension joins)
     ├── packages/
     │   ├── reactor-adapter/             @hhru/reactor-adapter 0.3.0 (refactored to consume text-tools)
-    │   └── text-tools/                  @reactor/text-tools 0.1.0 (NEW)
+    │   └── text-tools/                  @dkolosovsky/reactor-text-tools 0.1.0 (NEW)
     │       ├── src/
     │       │   ├── tools/               { coverLetter, score, questions }.ts (Zod + JSONSchema)
     │       │   ├── activities/          { coverLetter, score, questions }.ts (composeActivity)
@@ -528,15 +528,15 @@ Caller can override via `CoverLetterInput.prompt` field. Prompts are content; it
     │       ├── package.json             peer dep on @kolosochek/reactor-core ^0.2.0
     │       └── tsconfig.json
     └── extension/                       Chrome extension; joins workspaces
-        └── package.json                 deps: @reactor/text-tools, @kolosochek/reactor-core
+        └── package.json                 deps: @dkolosovsky/reactor-text-tools, @kolosochek/reactor-core
 ```
 
 ### Dependency direction
 
 ```
-extension                ─consumes→  @reactor/text-tools ─peer→ @kolosochek/reactor-core
-@hhru/reactor-adapter    ─consumes→  @reactor/text-tools ─peer→ @kolosochek/reactor-core
-@hhru server (later)     ─consumes→  @reactor/text-tools (optional, after CLI refactor)
+extension                ─consumes→  @dkolosovsky/reactor-text-tools ─peer→ @kolosochek/reactor-core
+@hhru/reactor-adapter    ─consumes→  @dkolosovsky/reactor-text-tools ─peer→ @kolosochek/reactor-core
+@hhru server (later)     ─consumes→  @dkolosovsky/reactor-text-tools (optional, after CLI refactor)
 ```
 
 ### Extension joining workspaces
@@ -547,7 +547,7 @@ Root `package.json` change:
 +  "workspaces": ["packages/*", "extension"],
 ```
 
-Extension can now `import { ... } from '@reactor/text-tools'` via npm workspace symlink. No publish step needed for development.
+Extension can now `import { ... } from '@dkolosovsky/reactor-text-tools'` via npm workspace symlink. No publish step needed for development.
 
 ---
 
@@ -571,7 +571,7 @@ Each sub-project gets its own brainstorm → spec → plan → execute cycle. Th
 
 **Dependencies:** none.
 
-**Outcome:** `npm i @reactor/text-tools` and an arbitrary caller can construct `Reactor.create({ llm }).use(textToolsAdapter)`, then `reactor.execute(buildCoverLetterIdea({...}))` returns a `CoverLetterSolution`.
+**Outcome:** `npm i @dkolosovsky/reactor-text-tools` and an arbitrary caller can construct `Reactor.create({ llm }).use(textToolsAdapter)`, then `reactor.execute(buildCoverLetterIdea({...}))` returns a `CoverLetterSolution`.
 
 ### 4.2 extension migration
 
@@ -722,7 +722,7 @@ Fixtures serve two purposes today (regression detection across prompt iterations
 
 ### Typed error hierarchy
 
-All errors inherit from `TextToolsError` (exported from `@reactor/text-tools`).
+All errors inherit from `TextToolsError` (exported from `@dkolosovsky/reactor-text-tools`).
 
 | Class | Cause | Recoverable? | Surface |
 |---|---|---|---|
@@ -871,7 +871,7 @@ These are deferred to per-sub-project specs/plans:
 2. **Extension's `HistoryEntry` ↔ Reactor's `ExperienceRecord` mapping.** Initial migration: extension writes its own HistoryEntry post-execute (as today). Phase 2: extension implements a custom `ExperienceRepository` and lets Reactor write history through `repositories.experience.append`. Which target for 4.2? (Recommend Phase 2 path: simpler total architecture; small upfront cost.)
 3. **Server-side or client-side LLM in 4.3?** After refactor, the LLM call moves out of the worker pool (server side) and into wherever Reactor runs. For CLI usage (`npm run hhru:score`), that's the user's machine. For background polling (search preset cron), it's still the server. Likely answer: both; Reactor instances are cheap to construct; LLMProvider is configured per environment.
 4. **Default prompt source-of-truth.** When porting prompts to text-tools, the existing extension prompts and existing hh.ru server prompts may diverge. Which one wins? (Recommend: pick the better-tested one per tool; re-evaluate after migration.)
-5. **Package namespace and publish target.** The spec currently uses `@reactor/text-tools` (namespace not yet claimed on npm). Alternatives: `@kolosochek/text-tools` (matches reactor-core's namespace, simpler if both publish together), `@hhru/text-tools` (workspace-internal, matches reactor-adapter, blocks third-party publish). Decide in the 4.1 plan based on whether eventual npm publish is in scope. Recommendation: stay workspace-only in 4.1 (file: link); pick canonical name when promoting.
+5. **Package namespace and publish target.** The spec currently uses `@dkolosovsky/reactor-text-tools` (namespace not yet claimed on npm). Alternatives: `@kolosochek/text-tools` (matches reactor-core's namespace, simpler if both publish together), `@hhru/text-tools` (workspace-internal, matches reactor-adapter, blocks third-party publish). Decide in the 4.1 plan based on whether eventual npm publish is in scope. Recommendation: stay workspace-only in 4.1 (file: link); pick canonical name when promoting.
 6. **Locale handling for prompts.** text-tools ships en + ru. What's the default? Recommend caller-provided in Idea input; locale inferred from resume language if absent.
 7. **`Reactor.execute(idea, opts)` opts shape.** This spec proposes `{ signal?, onProgress? }`. Should it also accept `repositoriesOverride?` or `llmOverride?` for per-call overrides? Recommend not now; YAGNI.
 
@@ -880,7 +880,7 @@ These are deferred to per-sub-project specs/plans:
 ## Acceptance criteria
 
 After 4.1 ships:
-- [ ] `npm i @reactor/text-tools` works in the workspace (file: link).
+- [ ] `npm i @dkolosovsky/reactor-text-tools` works in the workspace (file: link).
 - [ ] `Reactor.create({ llm: mockLLM }).use(textToolsAdapter)` constructs without error.
 - [ ] `reactor.execute(buildCoverLetterIdea({ vacancy, resume }))` returns a `Solution` with `letter: string`.
 - [ ] Same for `buildScoreIdea` and `buildQuestionsIdea`.
@@ -912,7 +912,7 @@ After 4.4 ships:
 For future readers / executors:
 
 1. **A+B+C+D+E drivers all apply.** Decoupling is multi-purpose, not a single-feature tactical change.
-2. **Approach B (extract `@reactor/text-tools`)** chosen over Approach A (refactor adapter in place) and Approach C (decompose adapter into two). Reasoning: Phase C just shipped adapter API; refactoring it is unnecessary; extension already has the right shape and can move to text-tools as primary impl.
+2. **Approach B (extract `@dkolosovsky/reactor-text-tools`)** chosen over Approach A (refactor adapter in place) and Approach C (decompose adapter into two). Reasoning: Phase C just shipped adapter API; refactoring it is unnecessary; extension already has the right shape and can move to text-tools as primary impl.
 3. **B1 (score in text-tools)** chosen. Score is a pure text-LLM operation; making it platform-agnostic enables extension-side scoring of pasted vacancies.
 4. **Deep unification on reactor-core (A in Q4)** chosen over loose dependency. Bundle size impact (~15-30 KB minified) is acceptable for the alignment benefit.
 5. **Idea-Triplet-strict.** No callback shortcuts. No `generateCoverLetter({...})` direct function exports. Always `reactor.execute(buildXxxIdea({...}))`. The Idea is the unit of communication.

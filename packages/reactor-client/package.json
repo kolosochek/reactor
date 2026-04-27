@@ -1,7 +1,8 @@
 {
-  "name": "@reactor/client",
+  "name": "@dkolosovsky/reactor-client",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "description": "Thin HTTP SDK for the Reactor service. Browser- and Node-friendly. POSTs Idea triplets, reconstructs typed TextToolsError instances from server responses, re-exports text-tools builders.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -18,12 +19,39 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@reactor/text-tools": "file:../text-tools"
+    "@dkolosovsky/reactor-text-tools": "^0.1.0"
   },
   "devDependencies": {
     "@kolosochek/reactor-core": "file:../../../ereal/reactor-core",
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.4.0"
+  },
+  "license": "MIT",
+  "author": "Dmitriy Kolosovskiy <kolosochek@gmail.com>",
+  "homepage": "https://github.com/kolosochek/reactor#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kolosochek/reactor.git",
+    "directory": "packages/reactor-client"
+  },
+  "bugs": {
+    "url": "https://github.com/kolosochek/reactor/issues"
+  },
+  "keywords": [
+    "reactor",
+    "idea-triplet",
+    "sdk",
+    "http-client",
+    "fetch",
+    "cover-letter",
+    "vacancy-score",
+    "interview-questions",
+    "llm",
+    "openrouter",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

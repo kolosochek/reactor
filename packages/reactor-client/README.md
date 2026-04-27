@@ -1,6 +1,6 @@
-# @reactor/client
+# @dkolosovsky/reactor-client
 
-Thin HTTP SDK for `@reactor/service`. Consumers (Chrome extension, hh.ru CLI scripts, future apps) build Idea triplets locally and dispatch them to a running Reactor service via this client. Browser-friendly (Chrome MV3) and Node-friendly (CLI).
+Thin HTTP SDK for `@dkolosovsky/reactor-service`. Consumers (Chrome extension, hh.ru CLI scripts, future apps) build Idea triplets locally and dispatch them to a running Reactor service via this client. Browser-friendly (Chrome MV3) and Node-friendly (CLI).
 
 ## Status
 
@@ -9,7 +9,7 @@ Thin HTTP SDK for `@reactor/service`. Consumers (Chrome extension, hh.ru CLI scr
 ## Usage
 
 ```ts
-import { ReactorClient, buildCoverLetterIdea } from '@reactor/client';
+import { ReactorClient, buildCoverLetterIdea } from '@dkolosovsky/reactor-client';
 
 const client = new ReactorClient({ baseUrl: 'http://localhost:3030' });
 
@@ -36,7 +36,7 @@ The same pattern works for `buildScoreIdea` (returns `{ score, reasoning, skillM
 Activity errors come through as typed `TextToolsError` subclasses (`LLMQuotaError`, `LLMTimeoutError`, `IdeaSchemaError`, etc.) reconstructed from the service response. HTTP-level issues (network failure, malformed response, unknown error class) throw `ReactorClientError`.
 
 ```ts
-import { LLMQuotaError, ReactorClientError } from '@reactor/client';
+import { LLMQuotaError, ReactorClientError } from '@dkolosovsky/reactor-client';
 
 try {
   const sol = await client.execute(idea, { providerConfig });
@@ -57,7 +57,7 @@ try {
 
 ## Dependencies
 
-- Runtime: `@reactor/text-tools` (for builder re-exports and the typed error hierarchy).
+- Runtime: `@dkolosovsky/reactor-text-tools` (for builder re-exports and the typed error hierarchy).
 - Type-only: `@kolosochek/reactor-core` (for `Idea` / `Solution` shapes); zero runtime cost on the consumer side.
 
 ## Spec / plan

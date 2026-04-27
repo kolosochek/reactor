@@ -1,7 +1,8 @@
 {
-  "name": "@reactor/text-tools",
+  "name": "@dkolosovsky/reactor-text-tools",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "description": "Universal text Idea-Transformers (cover-letter / vacancy-score / question-answer) for the Reactor ecosystem. Builders + Activities + Tools + typed errors.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -22,14 +23,40 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@kolosochek/reactor-core": "file:../../../ereal/reactor-core",
     "zod": "^3.22.0",
     "zod-to-json-schema": "^3.22.0"
   },
   "devDependencies": {
+    "@kolosochek/reactor-core": "file:../../../ereal/reactor-core",
     "@types/json-schema": "^7.0.15",
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0",
     "vitest": "^1.4.0"
+  },
+  "license": "MIT",
+  "author": "Dmitriy Kolosovskiy <kolosochek@gmail.com>",
+  "homepage": "https://github.com/kolosochek/reactor#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kolosochek/reactor.git",
+    "directory": "packages/text-tools"
+  },
+  "bugs": {
+    "url": "https://github.com/kolosochek/reactor/issues"
+  },
+  "keywords": [
+    "reactor",
+    "idea-triplet",
+    "text-tools",
+    "cover-letter",
+    "vacancy-score",
+    "interview-questions",
+    "llm",
+    "openrouter",
+    "zod",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -1,4 +1,4 @@
-# @reactor/service
+# @dkolosovsky/reactor-service
 
 HTTP microservice that hosts the Reactor instance and persists Idea / Experience / Lessons / Predictions / Tools to PostgreSQL via Drizzle. Consumers (Chrome extension, hh.ru CLI, future integrations) call `POST /reactor/execute` with an Idea triplet plus their own LLM provider config; the service constructs a request-scoped Reactor with those credentials, runs the Activity, persists the ExperienceRecord, and returns the Solution.
 

@@ -43,14 +43,14 @@ The work decomposes into four sub-projects:
 
 ## What's preserved from sub-project 4.1
 
-The 4.1 work (`@reactor/text-tools 0.1.0` + `@kolosochek/reactor-core 0.2.0`) **stays valuable**. It moves location of use:
+The 4.1 work (`@dkolosovsky/reactor-text-tools 0.1.0` + `@kolosochek/reactor-core 0.2.0`) **stays valuable**. It moves location of use:
 
 | Artifact | Old role (per superseded spec) | New role |
 |---|---|---|
-| `@kolosochek/reactor-core 0.2.0` | Peer dep for every consumer | **Internal dep of `@reactor/service`** |
-| `@reactor/text-tools 0.1.0` (Activities, schemas, builders, prompts, errors) | Library each consumer imports | **Internal dep of `@reactor/service`** for activities + adapter; **builders re-exported via `@reactor/client`** for type-safe Idea construction |
+| `@kolosochek/reactor-core 0.2.0` | Peer dep for every consumer | **Internal dep of `@dkolosovsky/reactor-service`** |
+| `@dkolosovsky/reactor-text-tools 0.1.0` (Activities, schemas, builders, prompts, errors) | Library each consumer imports | **Internal dep of `@dkolosovsky/reactor-service`** for activities + adapter; **builders re-exported via `@dkolosovsky/reactor-client`** for type-safe Idea construction |
 | `composeActivity` crystallization seam | Per-consumer | Service-internal (consumers never compose activities) |
-| `createMockLLMProvider`, `runLLMProviderContractTests` | Consumed by extension/adapter migration tests | Consumed by service tests; also exposed via `@reactor/client/test-utils` for consumer integration tests |
+| `createMockLLMProvider`, `runLLMProviderContractTests` | Consumed by extension/adapter migration tests | Consumed by service tests; also exposed via `@dkolosovsky/reactor-client/test-utils` for consumer integration tests |
 
 Net: 4.1's surface stays; users of that surface relocate from "every consumer" to "the one service".
 
@@ -64,7 +64,7 @@ graph TB
     subgraph dock["Docker Compose"]
       PG["postgres:16-alpine<br/>port via REACTOR_DB_PORT env<br/>volume reactor-pg-data"]
     end
-    subgraph node["Node.js process: @reactor/service"]
+    subgraph node["Node.js process: @dkolosovsky/reactor-service"]
       API["HTTP server<br/>fastify or express<br/>port via REACTOR_HTTP_PORT env"]
       RC["Reactor instance<br/>+ textToolsAdapter<br/>+ hhruAdapter (after 4.3)"]
       DZ["Drizzle ORM (postgres-js)"]
@@ -83,7 +83,7 @@ graph TB
     EREAL["ereal (future)"]
   end
 
-  subgraph clientpkg["@reactor/client (NEW thin SDK)"]
+  subgraph clientpkg["@dkolosovsky/reactor-client (NEW thin SDK)"]
     BLD["Builders (re-export from text-tools)"]
     HTTP["fetch HTTP client class"]
   end
@@ -100,7 +100,7 @@ graph TB
 
 ```
 1. Consumer (extension popup, CLI script, etc.) gathers inputs.
-2. Consumer imports buildXxxIdea from @reactor/client.
+2. Consumer imports buildXxxIdea from @dkolosovsky/reactor-client.
 3. Consumer calls buildXxxIdea(input) → Idea triplet (validated locally via Zod).
 4. Consumer calls reactorClient.execute(idea, providerConfig)
    → POST http://localhost:<PORT>/reactor/execute
@@ -163,7 +163,7 @@ Per `pokeroid/runtime/REACTOR.md:13-21` and `runtime/VISION.ru.md:11-17`:
 |---|---|
 | **001 Request** - atomic LLM transaction | `Activity` invocation that runs ONE `ctx.llm.complete(...)` call (e.g. `scoreVacancyActivity`). |
 | **002 Tool** - schema definition of capability | `text-tools` Tool definitions (`scoreVacancyTool`, `generateCoverLetterTool`, `answerQuestionsTool`) + `hhruAdapter` Tools (after 4.3). |
-| **003 Activity** - deterministic code impl of Tool (Dual Registry) | `composeActivity(...)` registry in `@reactor/text-tools`; service registers via `Reactor.use(adapter)`. |
+| **003 Activity** - deterministic code impl of Tool (Dual Registry) | `composeActivity(...)` registry in `@dkolosovsky/reactor-text-tools`; service registers via `Reactor.use(adapter)`. |
 | **004 Call** - parameterized request for execution | `DataMessage._call` shape (`{ _tool, ...params }`). |
 | **005 Data** | `DataMessage` envelope with `_call` discriminator. |
 | **006 Input** | `InputMessage` triggers scenario mode (LLM picks tool). |
@@ -177,7 +177,7 @@ Per `pokeroid/runtime/REACTOR.md:13-21` and `runtime/VISION.ru.md:11-17`:
 
 > Эта стратегия кристаллизации от латентной к явной логике открывает революционный подход к разработке. [...] Симуляция предшествует коду и информирует его.
 
-**Realized as forward-looking seam:** `composeActivity` in `@reactor/text-tools` 0.1.0 is the precise hook where Lessons (PG-persisted insights) and Predictions (PG-persisted forecasts) will compose with raw Activity execution. v0.1.0 ships the storage; sub-project **4.5** wires the composition. Until then, all execution runs the Explicit (engine) path. No crystallization tables added in 4.0 schema (tracked under Open Question #2 of pre-T3 alignment, deferred to 4.5).
+**Realized as forward-looking seam:** `composeActivity` in `@dkolosovsky/reactor-text-tools` 0.1.0 is the precise hook where Lessons (PG-persisted insights) and Predictions (PG-persisted forecasts) will compose with raw Activity execution. v0.1.0 ships the storage; sub-project **4.5** wires the composition. Until then, all execution runs the Explicit (engine) path. No crystallization tables added in 4.0 schema (tracked under Open Question #2 of pre-T3 alignment, deferred to 4.5).
 
 ### Per-request LLM contract (resolved Open Question #2)
 
@@ -199,7 +199,7 @@ Per `pokeroid/runtime/REACTOR.md:13-21` and `runtime/VISION.ru.md:11-17`:
 
 ## Component design
 
-### 1. `@reactor/service` (NEW workspace package)
+### 1. `@dkolosovsky/reactor-service` (NEW workspace package)
 
 **Location**: `packages/reactor-service/` in this repo (npm workspace). Standalone since 2026-04-27.
 
@@ -217,18 +217,18 @@ Per `pokeroid/runtime/REACTOR.md:13-21` and `runtime/VISION.ru.md:11-17`:
 - Migrations: Drizzle Kit (`drizzle-kit generate` + `drizzle-kit migrate`).
 - Runtime config: `dotenv` + `zod` validation of env shape.
 
-### 2. `@reactor/client` (NEW workspace package)
+### 2. `@dkolosovsky/reactor-client` (NEW workspace package)
 
 **Location**: `packages/reactor-client/` in this repo.
 
 **Responsibilities**:
-- Re-export builders from `@reactor/text-tools` (`buildCoverLetterIdea`, etc.) so consumers get type-safe Idea construction.
+- Re-export builders from `@dkolosovsky/reactor-text-tools` (`buildCoverLetterIdea`, etc.) so consumers get type-safe Idea construction.
 - Provide `ReactorClient` class with methods: `execute(idea, providerConfig, opts?)`, `experience.list(query)`, `lessons.list(query)`, etc.
 - Pure HTTP - `fetch` based. Zero native deps. Browser-friendly (Chrome MV3 service workers, popups). Node-friendly (CLI scripts).
 
 **Public surface**:
 ```ts
-import { buildCoverLetterIdea, buildScoreIdea, buildQuestionsIdea, ReactorClient } from '@reactor/client';
+import { buildCoverLetterIdea, buildScoreIdea, buildQuestionsIdea, ReactorClient } from '@dkolosovsky/reactor-client';
 
 const client = new ReactorClient({ baseUrl: 'http://localhost:3030' });
 
@@ -252,7 +252,7 @@ const solution = await client.execute(idea, {
     ├── docker-compose.yml                  NEW: postgres service
     ├── .env.example                        NEW: env vars contract
     ├── packages/
-    │   ├── text-tools/                     @reactor/text-tools 0.1.0 (4.1, unchanged; service-internal)
+    │   ├── text-tools/                     @dkolosovsky/reactor-text-tools 0.1.0 (4.1, unchanged; service-internal)
     │   ├── reactor-adapter/                @hhru/reactor-adapter 0.2.0 (Phase C; service-internal after 4.3)
     │   ├── reactor-service/                NEW: HTTP server + Drizzle/Postgres
     │   │   ├── src/
@@ -281,7 +281,7 @@ const solution = await client.execute(idea, {
     │       │   └── test-utils/             re-export from text-tools/test-utils
     │       └── package.json                deps: text-tools (for builders); type-only on reactor-core
     └── extension/                          Chrome extension (4.2 will integrate)
-        └── package.json                    NEW dep: @reactor/client (workspace link)
+        └── package.json                    NEW dep: @dkolosovsky/reactor-client (workspace link)
 ```
 
 ---
@@ -535,7 +535,7 @@ Each gets its own brainstorm → spec → plan → execute cycle.
 8. `buildLLMProvider(config)` factory.
 9. Route handlers: POST /reactor/execute, GET /reactor/experience, GET /reactor/health.
 10. `ReactorClient` HTTP client class.
-11. `@reactor/client` re-exports text-tools builders.
+11. `@dkolosovsky/reactor-client` re-exports text-tools builders.
 12. Tests: testcontainers-node spins up isolated Postgres for integration tests; mock LLM for activity tests; client → service → service-side-handler full round-trip test.
 13. README + CHANGELOG.
 
@@ -545,10 +545,10 @@ Each gets its own brainstorm → spec → plan → execute cycle.
 
 ### 4.2 Extension as thin client
 
-**Goal**: Chrome extension consumes `@reactor/client`. `extension/src/lib/actions/{generateCoverLetter,answerQuestions}.ts` removed.
+**Goal**: Chrome extension consumes `@dkolosovsky/reactor-client`. `extension/src/lib/actions/{generateCoverLetter,answerQuestions}.ts` removed.
 
 **Tasks**:
-1. Add `@reactor/client` workspace dep to `extension/package.json`.
+1. Add `@dkolosovsky/reactor-client` workspace dep to `extension/package.json`.
 2. Each of 4 caller sites (popup × 2 + service-worker × 2): replace `await generateCoverLetter({...})` with `await reactorClient.execute(buildCoverLetterIdea({...}), { providerConfig })`.
 3. Build `providerConfig` from extension's settings (active preset + apiKey).
 4. Remove obsolete `extension/src/lib/actions/`. Existing prompts/llm/storage stay (storage retains HistoryEntry for now, with optional read-from-service via /reactor/experience as enhancement).
@@ -560,7 +560,7 @@ Each gets its own brainstorm → spec → plan → execute cycle.
 
 ### 4.3 hh.ru CLI/server as thin client
 
-**Goal**: hh.ru-server's CLI scripts (`scripts/cli/{score,letter,apply,fetch}.ts`) and server-side workers consume `@reactor/client` for LLM operations. `@hhru/reactor-adapter` is **absorbed into the service** (its activities `fetchActivity`/`applyActivity` register with the service's Reactor; CLI scripts don't run them locally).
+**Goal**: hh.ru-server's CLI scripts (`scripts/cli/{score,letter,apply,fetch}.ts`) and server-side workers consume `@dkolosovsky/reactor-client` for LLM operations. `@hhru/reactor-adapter` is **absorbed into the service** (its activities `fetchActivity`/`applyActivity` register with the service's Reactor; CLI scripts don't run them locally).
 
 **Tasks**:
 1. Service-side: register `hhruAdapter` in service's Reactor instance (alongside `textToolsAdapter`). Now service handles ALL hh.ru pipeline activities.
@@ -611,7 +611,7 @@ graph LR
 |---|---|---|
 | Drizzle schema | Migrations apply cleanly; jsonb queries work | testcontainers-node Postgres |
 | Repositories (PostgresExperienceRepository, etc.) | Append/list/query semantics | testcontainers Postgres + Drizzle |
-| Reactor + Adapter assembly inside service | Idea executes correctly with mocked LLMProvider | mock LLMProvider via `createMockLLMProvider` from `@reactor/text-tools/test-utils` |
+| Reactor + Adapter assembly inside service | Idea executes correctly with mocked LLMProvider | mock LLMProvider via `createMockLLMProvider` from `@dkolosovsky/reactor-text-tools/test-utils` |
 | Route handlers (POST /execute, etc.) | HTTP contract: status codes, error mapping, request validation | supertest or fastify inject |
 | ReactorClient | Constructs correct HTTP requests; parses responses; surfaces typed errors | mock-fetch |
 | End-to-end | Full client → service → DB round-trip | testcontainers + spawn service in test |
@@ -663,8 +663,8 @@ What stays compatible across the migration:
 
 | Interface / surface | Preserved? |
 |---|---|
-| `@reactor/text-tools` 0.1.0 builders, schemas, types | ✅ yes; re-exported via `@reactor/client` |
-| `@reactor/text-tools` Activities, adapter, prompts | ✅ yes; consumed service-side |
+| `@dkolosovsky/reactor-text-tools` 0.1.0 builders, schemas, types | ✅ yes; re-exported via `@dkolosovsky/reactor-client` |
+| `@dkolosovsky/reactor-text-tools` Activities, adapter, prompts | ✅ yes; consumed service-side |
 | `@kolosochek/reactor-core` 0.2.0 SPI | ✅ yes; used internally by service |
 | `@hhru/reactor-adapter` 0.2.0 (Phase C) shape | ✅ yes; will be registered in service's Reactor in 4.3 |
 | Phase C CLI flag surface (`hhru:fetch`, `--auto`, `--min-score N --no-letter`, `--has-letter`, etc.) | ✅ yes; CLI scripts stay; only their internals shift to ReactorClient |
@@ -693,7 +693,7 @@ Deferred to per-sub-project specs/plans:
 
 1. **HistoryEntry migration in extension**: read existing `chrome.storage.local` HistoryEntry rows + POST them to `/reactor/experience/import` on first run, then deprecate local storage? Or leave existing rows alone, only new history goes through service? (Sub-project 4.2.)
 2. ~~**`Reactor.execute(idea, opts.llmOverride?)` vs request-scoped Reactor**~~ **RESOLVED (2026-04-27): fresh `Reactor.create({ llm })` per request.** No changes to `@kolosochek/reactor-core` 0.2.0. See "Per-request LLM contract" subsection of Pokeroid Vision Alignment for full rationale.
-3. **Provider routing for full pokeroid coverage**: `@kolosochek/reactor-core` ships `createOpenRouter`. Other providers (cerebras, groq, deepseek, xai, openai) need their own factories. Are they part of reactor-core's reference impls, or do they live in `@reactor/service` only? (Sub-project 4.0.)
+3. **Provider routing for full pokeroid coverage**: `@kolosochek/reactor-core` ships `createOpenRouter`. Other providers (cerebras, groq, deepseek, xai, openai) need their own factories. Are they part of reactor-core's reference impls, or do they live in `@dkolosovsky/reactor-service` only? (Sub-project 4.0.)
 4. **Service binary packaging**: ship as workspace package run from source vs `pkg`/`nexe` standalone binary vs Docker image of the Node process itself? (Future; post-4.0.)
 5. **Auth in v0.2**: bearer token? mTLS? OIDC? Localhost-only is sufficient for MVP. (Future.)
 6. **Multi-instance / horizontal scale**: Postgres handles concurrent connections; service is mostly stateless. Connection pool tuning + leader election for migrations are knobs. (Future.)
@@ -709,7 +709,7 @@ After 4.0 ships:
 - [ ] `POST /reactor/execute` with `{ idea: buildCoverLetterIdea(...), providerConfig: { ... } }` and a mock LLM provider returns a valid `Solution` JSON.
 - [ ] `GET /reactor/experience?domain=text-tools` returns the persisted record from the previous step.
 - [ ] `ReactorClient` instance correctly constructs requests and parses responses.
-- [ ] All builders (`buildCoverLetterIdea`, `buildScoreIdea`, `buildQuestionsIdea`) re-exported from `@reactor/client`.
+- [ ] All builders (`buildCoverLetterIdea`, `buildScoreIdea`, `buildQuestionsIdea`) re-exported from `@dkolosovsky/reactor-client`.
 - [ ] Test suite passes: testcontainers Postgres for integration, mock LLM for activity tests, mock-fetch for client tests.
 - [ ] `.env.example` documents all required env vars.
 - [ ] README explains `docker compose up`, `npm run reactor:db:migrate`, `npm run reactor:start`.
@@ -739,7 +739,7 @@ For future readers / executors:
 1. **Reactor is a microservice, not an embedded library** (per pokeroid REACTOR.md:80-86). Old library-per-consumer model in superseded spec is rejected.
 2. **PostgreSQL via Docker** for service-side persistence. Aligns with pokeroid `storage/README.md` pattern. Drizzle ORM with `postgres-js` driver. SQLite/in-memory rejected: doesn't scale for multi-consumer, doesn't match pokeroid storage vision.
 3. **Per-request provider config** from consumer (matches pokeroid `agent/src/Provider/index.ts` "config from minimal input"). Service does not store API keys.
-4. **`@reactor/service` and `@reactor/client` as workspace packages** in this repo.for now. Promote to own repos when stable.
+4. **`@dkolosovsky/reactor-service` and `@dkolosovsky/reactor-client` as workspace packages** in this repo.for now. Promote to own repos when stable.
 5. **Sub-project ordering** prepends 4.0 (service genesis) before 4.2/4.3/4.4. Old superseded spec's 4.1 (text-tools genesis, already shipped) becomes service-internal dependency.
 6. **Strict Idea-Triplet paradigm** preserved. Idea triplet IS the unit of communication across the HTTP boundary; consumer constructs locally, service executes, both sides see the same Idea shape.
 7. **No partial states** preserved. Service either persists a complete ExperienceRecord (success or failure) and returns Solution, or throws typed error and persists `outcome: 'failure'` record.
