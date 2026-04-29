@@ -4,6 +4,22 @@
 
 A consumer constructs an **Idea** (a typed, immutable triplet) and dispatches it to a Reactor instance. The Reactor selects an **Activity** (an Idea-Transformer) by domain + tool name, executes it (calling an LLM if the Activity is Latent), persists the **ExperienceRecord** for long-term memory, and returns the same Idea with `solution` populated.
 
+## What works today
+
+Text-tools used to live inside a single job-search consumer's adapter package. The recent genesis effort (closed 2026-04-27, see [Genesis](#genesis)) lifted them out into a standalone Reactor microservice plus thin SDK. Each row pairs a concrete pain point with the deliverable that removes it and points at the code that owns the fix.
+
+| Problem | Solution | Where |
+|---|---|---|
+| Activities were embedded inside one consumer's adapter; no reuse path for browser extensions, CLIs, or future apps. | Standalone Activity bundle `@dkolosovsky/reactor-text-tools`. Any Reactor wires it via `Reactor.create({ llm }).use(textToolsAdapter)`. | `packages/text-tools/src/` |
+| Every consumer maintained its own LLM trace store; nothing was shared across runs or domains. | One canonical Postgres database. Every execution writes an `ExperienceRecord`; the service exposes filtered reads via `GET /reactor/experience`. | `packages/reactor-service/src/db/schema.ts`, `packages/reactor-service/src/routes/experience.ts` |
+| The service would have had to store LLM API keys for every consumer. | The service holds zero credentials. Each `POST /reactor/execute` carries its own `providerConfig`; a transient `LLMProvider` is built per request and discarded after the response. | `packages/reactor-service/src/reactor/llmFromConfig.ts`, `packages/reactor-service/src/reactor/buildReactor.ts` |
+| The HTTP boundary erased typed-error semantics; consumers caught a generic `Error` and parsed strings. | `TextToolsError` subclasses (`IdeaSchemaError`, `LLMQuotaError`, `LLMTimeoutError`, `LLMNetworkError`, `LLMOutputParseError`, `ActivityCancelledError`) serialize with a discriminator + payload; the SDK reconstructs the original class on the consumer. `catch (e: LLMQuotaError)` works across the wire. | `packages/reactor-service/src/routes/errorMapper.ts`, `packages/reactor-client/src/errors.ts` |
+| Local schema changes would have drifted away from upstream `reactor-core` and broken its consumers. | The database schema is 1:1 with `reactor-core` SPI types; domain-specific extensions live in a `metadata jsonb` column, indexable later via `metadata->>'key'` without DDL changes. | `packages/reactor-service/src/db/schema.ts` |
+| Integration test suites used to leak fixtures and migration state into each other. | Each suite spins up an isolated `postgres:16-alpine` container via `testcontainers-node` and runs migrations from scratch; integration tests exercise SPI repositories and HTTP routes against fresh databases. | `packages/reactor-service/src/__tests__/*.integration.test.ts` |
+| The whole stack was internal to the predecessor monorepo; outside consumers had no way in. | The SDK and Activity bundle are published on npm; the service stays private to keep deployment flexibility. | `npm install @dkolosovsky/reactor-client` |
+
+138/138 tests pass (48 service + 10 client + 80 text-tools); `tsc` clean across all three packages; the SDK is installable from npm today against any compatible Reactor instance.
+
 ## Status
 
 | Sub-project | State | Detail |
@@ -56,7 +72,7 @@ flowchart LR
     PG[("PostgreSQL<br/>experience / lessons / ideas /<br/>predictions / tools")]
 
     Consumer -->|build Idea| Client
-    Client -->|HTTP POST<br/>{idea, providerConfig}| Service
+    Client -->|"HTTP POST<br/>{idea, providerConfig}"| Service
     Service -->|build| Reactor
     Reactor -->|invoke| LLM
     Reactor -->|append ExperienceRecord| PG
