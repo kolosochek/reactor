@@ -20,6 +20,32 @@ Text-tools used to live inside a single job-search consumer's adapter package. T
 
 138/138 tests pass (48 service + 10 client + 80 text-tools); `tsc` clean across all three packages; the SDK is installable from npm today against any compatible Reactor instance.
 
+## Domain example: proptech
+
+A real-estate aggregator for Vietnamese rental markets ([ereal](https://github.com/kolosochek/ereal)) is a concrete proptech consumer of the Reactor pattern. The linked repo runs its own Reactor runtime today; the Activity bundle below describes the same domain in protocol terms and ports onto `@dkolosovsky/reactor-service` once an adapter is wired.
+
+The platform serves three business cases: end-user property search across a multilingual UI; analyst rhythm with daily sync plus ad-hoc natural-language queries; cross-source price-arbitrage detection. The full protocol surface comes into play: heterogeneous sources, latent and explicit Activities, both execution modes, and a long-running ExperienceRecord history that doubles as a price-trend dataset.
+
+### Activities the domain registers
+
+| Group | Activities | Mode |
+|---|---|---|
+| **Source collection** | `collectBatdongsan` (Playwright, two stages: list pages, then detail enrichment with coordinates and contacts), `collectNhatot` (`__NEXT_DATA__` extraction plus Zalo phone enrichment). | Explicit |
+| **Enrichment** | `translateProperties` (Vietnamese to English / Russian, diacritics preserved), `validateProperties` (reject listings missing price / address / area; flag duplicates), `enrichPipeline` (composite). | Latent + Explicit |
+| **Reads** | `queryProperties` (city / district / price filters), `getStats` (group-by aggregations). | Explicit |
+| **NL to SQL search** | 4-step chain `parseSearchIntent` → `buildSearchQuery` → `executePropertySearch` → `evaluateSearchResults`, with `nlToSearchParams` as entry helper. Turns *"two-bed apartments in Da Nang under 15M VND"* into a result set. | Latent + Explicit chain |
+
+### Business pains, mapped to Reactor primitives
+
+| Business pain | Reactor primitive |
+|---|---|
+| Heterogeneous source protocols (HTML scraping, JSON islands, paginated APIs). | One Activity per source / stage, registered against the same Reactor. |
+| Two-stage enrichment: list page now, detail page minutes later, cannot lose partial state. | Stage 1 output persists in an `ExperienceRecord`; stage 2 either chains in-batch via `†state.X` refs or reads back through `GET /reactor/experience`. |
+| Translation cost and latency are LLM-bound; validation is deterministic. | Latent vs Explicit Activity distinction; only translation pays the LLM tax. |
+| Daily sync is a fixed pipeline; analyst questions arrive in natural language. | Batch mode (`PlanMessage.calls` in order with `†state.X` ref resolution) for the first; Scenario mode (LLM picks one Tool) for the second. |
+| Cross-language UI: Vietnamese, English, Russian. | The translation Activity writes all three variants into `metadata jsonb`; the UI reads whichever it needs without re-running the LLM. |
+| Long-term price-trend analysis and cross-source arbitrage. | Historical `ExperienceRecord`s queryable by `toolName` and time window via `GET /reactor/experience`. |
+
 ## Status
 
 | Sub-project | State | Detail |
