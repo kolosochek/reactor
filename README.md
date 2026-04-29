@@ -54,7 +54,7 @@ The platform serves three business cases: end-user property search across a mult
 | **4.1** | `inherited` | text-tools (cover-letter / score / questions) carried over from prior work |
 | **4.5** | `pending` | crystallization tables wiring (composeActivity reading Lessons, gating Activity execution) |
 
-Prior planned sub-projects 4.2 / 4.3 / 4.4 (Chrome extension migration / hh.ru CLI migration / e2e pipeline test) were dropped from scope.
+Prior planned sub-projects 4.2 / 4.3 / 4.4 (Chrome extension migration / CLI migration / e2e pipeline test) were dropped from scope.
 
 ## Packages
 
@@ -326,7 +326,15 @@ Anticipated architectural shifts not yet active are captured in [`EVOLUTION.md`]
 
 ## Genesis
 
-This repository was extracted from the `hhru` job-search-tracker monorepo on 2026-04-27. The pre-extraction history is folded into the `Initial commit`. All subsequent commits are sub-project 4.0 chunk work.
+The Reactor pattern emerged across three independent domains that all needed the same primitive: a typed, immutable, persistent unit of agent-environment interaction.
+
+| Domain | What needed coordinating | What Reactor gave it |
+|---|---|---|
+| **Game state** | A poker-bot runtime needed game state to travel between bots, engines, and an LLM "universal interpreter" without hard-coding any single game's notation. The original home of the Idea-Triplet protocol. | `{Schema, Context, Solution}` as the immutable unit on the wire; bots, engines, and the universal interpreter all read from and write into the same triplet. |
+| **Text-tool Activities** | Three LLM-backed text Activities for a hiring pipeline (`generateCoverLetter`, `scoreVacancy`, `answerQuestions`) needed by multiple consumers (browser extension, CLI, future apps). Embedding them inside any one would have prevented reuse. | `@dkolosovsky/reactor-text-tools` as a standalone Activity bundle on npm, plus `@dkolosovsky/reactor-service` as a canonical HTTP runtime any consumer can adopt. |
+| **Data aggregation** ([ereal](https://github.com/kolosochek/ereal)) | Heterogeneous source ingestion, two-stage enrichment, multilingual translation, and natural-language search over a Vietnamese rental-market dataset (see [Domain example: proptech](#domain-example-proptech)). | Validation that the protocol is not game-specific or text-specific, and that an Activity bundle can freely mix Latent (LLM-driven) and Explicit (deterministic) Activities under one Reactor. |
+
+This repository ships the canonical runtime substrate for the pattern. The pre-extraction history is folded into the `Initial commit` (2026-04-27); every commit since has built the runtime surface summarized in [What works today](#what-works-today).
 
 ## Documents
 
