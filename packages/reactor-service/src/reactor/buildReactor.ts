@@ -8,7 +8,10 @@
 import { Reactor } from '@kolosochek/reactor-core';
 import { textToolsAdapter } from '@dkolosovsky/reactor-text-tools';
 import type { LLMProvider, RepositoriesProvider } from '@kolosochek/reactor-core';
+import { createKaironForecastAdapter } from '../kairon/adapter.js';
 
 export function buildReactor(llm: LLMProvider, repositories: RepositoriesProvider): Reactor {
-  return Reactor.create({ llm }).use({ ...textToolsAdapter, repositories });
+  return Reactor.create({ llm })
+    .use({ ...textToolsAdapter, repositories })
+    .use(createKaironForecastAdapter());
 }

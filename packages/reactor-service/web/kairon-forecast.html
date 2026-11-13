@@ -1,0 +1,1167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kairon forecast agent</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e2e0da;
+  --accent: #2f5d8a; --ok: #2e7d4f; --bad: #b3261e; --warn: #9a6700; --llm: #6b4fa0; --kairon: #2e7d4f;
+  --c1: #2f5d8a; --c2: #c27c2c; --user: #e8eef5; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #a09e97; --line: #34332f;
+    --accent: #7fb0e0; --ok: #6cc28f; --bad: #f08a80; --warn: #e0b35a; --llm: #b79be6; --kairon: #6cc28f;
+    --c1: #7fb0e0; --c2: #e0a35a; --user: #26303b; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; }
+header h1 { font-size: 17px; margin: 0; }
+.tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--warn); color: var(--warn); }
+.settings { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; align-items: flex-end; }
+.settings label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 2px; }
+.modelinfo { font-size: 12px; color: var(--muted); min-width: 220px; }
+input, textarea, select, button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+select#model { max-width: 340px; }
+main { max-width: 1180px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
+.msg { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+.msg.user { background: var(--user); align-self: flex-end; max-width: 80%; white-space: pre-wrap; }
+.msg h3 { margin: 4px 0 8px; font-size: 15px; }
+.msg h4 { margin: 12px 0 6px; font-size: 14px; }
+.steps { font-size: 13px; color: var(--muted); margin: 0 0 8px; padding-left: 18px; }
+.explain { white-space: pre-wrap; }
+.warnbox { border-left: 3px solid var(--warn); padding: 4px 10px; font-size: 13px; color: var(--warn); margin: 8px 0; }
+.errbox { border-left: 3px solid var(--bad); padding: 4px 10px; color: var(--bad); white-space: pre-wrap; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+th, td { border-bottom: 1px solid var(--line); padding: 5px 8px; text-align: right; white-space: nowrap; vertical-align: top; }
+th:first-child, td:first-child { text-align: left; }
+table.answer th:first-child, table.answer td:first-child { white-space: normal; min-width: 180px; }
+td.left, th.left { text-align: left; }
+td.wrapcell { white-space: normal; text-align: left; min-width: 320px; }
+tr.reco td { background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.st-ok { color: var(--ok); } .st-refused, .st-invalid { color: var(--bad); }
+.neg { color: var(--bad); } .pos { color: var(--ok); }
+details { margin-top: 6px; font-size: 13px; }
+details > summary { cursor: pointer; }
+pre { font-family: var(--mono); font-size: 12px; background: var(--bg); padding: 8px; border-radius: 6px; overflow: auto; max-height: 480px; margin: 6px 0; white-space: pre-wrap; word-break: break-word; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.muted { color: var(--muted); }
+.composer { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 16px; display: flex; gap: 8px; }
+.composer textarea { flex: 1; min-height: 70px; resize: vertical; }
+.composer button { background: var(--accent); color: #fff; border: 0; padding: 0 18px; cursor: pointer; }
+.composer button:disabled { opacity: .5; cursor: default; }
+.legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+svg text { font-size: 11px; }
+.live { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+.live ol { margin: 0; padding-left: 18px; font-size: 13px; }
+.stream { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow: auto; background: var(--bg); border-radius: 6px; padding: 6px 8px; margin-top: 6px; }
+.stream.reasoning { color: var(--muted); font-style: italic; max-height: 100px; }
+.badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid currentColor; margin-left: 4px; }
+.k-llm { color: var(--llm); } .k-kairon { color: var(--kairon); } .k-tool { color: var(--accent); } .k-run { color: var(--muted); }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+.card > .head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+.card > .head b { font-family: var(--mono); font-size: 13px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 13px; margin: 4px 0; }
+.kv span:nth-child(odd) { color: var(--muted); }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.toolbar button { font-size: 13px; cursor: pointer; }
+@media (max-width: 640px) { .msg.user { max-width: 100%; } .settings { margin-left: 0; } select#model { max-width: 100%; } }
+
+/* ---------- CFO report (stage 4) ---------- */
+:root {
+  --active: #2a78d6; --v1: #eb6834; --v2: #1baf7a; --v3: #eda100; --v4: #e87ba4;
+  --good: #006300; --bad2: #d03b3b; --good-mark: #0ca30c; --bad-mark: #d03b3b; --grid: #e1e0d9; --axis: #c3c2b7; --closed: rgba(11, 11, 11, 0.045);
+}
+@media (prefers-color-scheme: dark) {
+  :root { --active: #3987e5; --v1: #d95926; --v2: #199e70; --v3: #c98500; --v4: #d55181;
+    --good: #0ca30c; --bad2: #e66767; --good-mark: #0ca30c; --bad-mark: #d03b3b; --grid: #2c2c2a; --axis: #4a4a46; --closed: rgba(255, 255, 255, 0.05); }
+}
+.report { display: flex; flex-direction: column; gap: 22px; }
+.eyebrow { font-size: 12px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.lead { font-size: 21px; line-height: 1.38; font-weight: 600; margin: 6px 0 10px; max-width: 62ch; text-wrap: pretty; }
+.reco-line { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; font-size: 14px; max-width: 80ch; }
+.vchip { display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.vcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; }
+.vcard { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px;
+  border: 1px solid var(--line); border-top: 3px solid var(--vc); border-radius: 10px; background: var(--panel); }
+.vcard:hover { border-color: var(--vc); }
+.vcard:focus-visible { outline: 2px solid var(--vc); outline-offset: 2px; }
+.vcard[aria-selected="true"] { box-shadow: inset 0 0 0 1px var(--vc); background: color-mix(in srgb, var(--vc) 6%, var(--panel)); }
+.vcard .vc-head { display: flex; gap: 8px; align-items: baseline; }
+.vcard .vc-head b { font-family: var(--mono); font-size: 13px; }
+.vcard .vc-title { font-weight: 600; font-size: 14px; line-height: 1.3; }
+.badge-reco { margin-left: auto; font-size: 11px; padding: 0 8px; border-radius: 999px; background: var(--ink); color: var(--panel); white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: 12px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.irr-row { display: grid; grid-template-columns: 64px 1fr auto; gap: 6px; align-items: center; font-size: 12px; }
+.irr-row .v { font-variant-numeric: tabular-nums; text-align: right; }
+.vc-foot { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.key { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.key svg { vertical-align: middle; }
+.r-panel { display: flex; flex-direction: column; gap: 22px; border-top: 1px solid var(--line); padding-top: 16px; animation: r-in .28s ease; }
+@keyframes r-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .r-panel { animation: none; } }
+.r-panel h3 { margin: 0; font-size: 18px; display: flex; gap: 8px; align-items: center; }
+.story { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.story h5 { margin: 0 0 4px; }
+.story p { margin: 0; font-size: 14px; line-height: 1.5; text-wrap: pretty; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.tile { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.tile .lbl { font-size: 12px; color: var(--muted); }
+.tile .val { font-size: 19px; font-weight: 600; }
+.tile .was { font-size: 12px; color: var(--muted); }
+.tile .dl { font-size: 12px; font-weight: 600; }
+.dl.good { color: var(--good); } .dl.bad { color: var(--bad2); } .dl.flat { color: var(--muted); font-weight: 400; }
+.r-sec h4 { margin: 0; font-size: 15px; }
+.r-sec .sub { font-size: 12px; color: var(--muted); margin: 2px 0 8px; max-width: 90ch; }
+.chartwrap { position: relative; }
+.chartwrap svg { display: block; width: 100%; height: auto; overflow: visible; }
+.scrollx { overflow-x: auto; }
+.scrollx > .chartwrap { min-width: 680px; }
+.tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  font-size: 12px; line-height: 1.45; box-shadow: 0 2px 10px rgba(0, 0, 0, .08); white-space: nowrap; display: none; z-index: 2; }
+.tip b { font-weight: 600; }
+.smalls { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 14px; }
+.smalls h6 { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+.notes { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
+.notes ul { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.caveats { font-size: 13px; color: var(--muted); }
+.caveats ul { margin: 4px 0 0; padding-left: 18px; }
+.vchart text { font-size: 11px; fill: var(--muted); }
+.vchart text.ink { fill: var(--ink); }
+.vchart text.lbl { font-size: 12px; fill: var(--ink); }
+@media (max-width: 760px) { .story { grid-template-columns: 1fr; } .lead { font-size: 18px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kairon · агент прогноза</h1>
+  <span class="tag">Прототип DEV-1364 · синтетический проект Rivergate</span>
+  <div class="settings">
+    <label>OpenRouter API key<input id="key" type="password" size="24" autocomplete="off" placeholder="sk-or-..."></label>
+    <label>Поиск модели<input id="modelFilter" size="14" placeholder="gemini, claude…"></label>
+    <label>Модель (structured outputs)<select id="model"><option>загрузка…</option></select></label>
+    <label>Вариантов<select id="count"><option>2</option><option selected>3</option><option>4</option></select></label>
+    <div class="modelinfo" id="modelInfo"></div>
+    <label>Сохранённый прогон<input id="replay" type="file" accept=".ndjson,application/x-ndjson"></label>
+  </div>
+</header>
+<main id="chat">
+  <div class="msg">
+    <h3>Как это работает</h3>
+    <ol class="steps">
+      <li><span class="mono">kairon.baseline</span>: сервис читает активный прогноз и утверждённый бюджет (обещание инвесторам) и считает оба через <code>evaluate</code>.</li>
+      <li><span class="mono">kairon.proposeVariants</span>: LLM отвечает по строгой JSON-схеме (коды строк и открытые месяцы заданы перечислением). Патч, который трогает закрытый месяц, возвращается LLM с ошибкой.</li>
+      <li><span class="mono">kairon.scoreVariants</span>: каждый патч применяется детерминированно и считается сервером Kairon. Отказ сервера показывается как результат варианта.</li>
+      <li><span class="mono">kairon.explainVariants</span>: LLM объясняет ранжирование. Цифры в тексте подставлены из ответов <code>evaluate</code>.</li>
+    </ol>
+    <div class="muted" style="font-size:13px">Под каждым ответом блок «Технические детали»: сырой запрос, tool calls с JSON-схемами входа, тела запросов к LLM, время до первого токена, сырые ответы, вызовы Kairon и полный таймлайн событий.</div>
+  </div>
+</main>
+<div class="wrap">
+  <div class="composer">
+    <textarea id="input">Разрешение на ввод в эксплуатацию (kolaudace) сдвигается на 3 месяца: с декабря 2027 на март 2028. Достройка растягивается, передача квартир и выход тоже сдвигаются. Как сохранить партнёрам IRR, обещанный в утверждённом бюджете?</textarea>
+    <button id="send">Отправить</button>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  const API = location.protocol === 'file:' ? 'http://127.0.0.1:3030' : '';
+  const $ = (id) => document.getElementById(id);
+  const chat = $('chat'), keyEl = $('key'), modelEl = $('model'), filterEl = $('modelFilter'), infoEl = $('modelInfo');
+  const countEl = $('count'), inputEl = $('input'), sendEl = $('send'), replayEl = $('replay');
+  const SAMPLE_MODEL = 'kairon/sample-no-llm';
+  const history = [];
+  let models = [];
+  let defaultModel = 'google/gemini-3.8-flash';
+  let serverKey = false;
+
+  function storage(kind) { try { return window[kind]; } catch (e) { return null; } }
+  function load(kind, k, d) { try { const s = storage(kind); return (s && s.getItem(k)) || d; } catch (e) { return d; } }
+  function save(kind, k, v) { try { const s = storage(kind); if (s) s.setItem(k, v); } catch (e) { /* storage blocked */ } }
+
+  function el(tag, attrs, kids) {
+    const n = document.createElement(tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => {
+      if (v === undefined || v === null) return;
+      if (k === 'text') n.textContent = v; else n.setAttribute(k, v);
+    });
+    (kids || []).forEach((c) => { if (c !== null && c !== undefined && c !== false) n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return n;
+  }
+  function svgEl(tag, attrs, style) {
+    const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.entries(attrs).forEach(([k, v]) => n.setAttribute(k, v));
+    Object.entries(style || {}).forEach(([k, v]) => n.style.setProperty(k, v));
+    return n;
+  }
+  const ms = (v) => (v === null || v === undefined) ? 'н/д' : (v >= 1000 ? (v / 1000).toFixed(2) + ' с' : Math.round(v) + ' мс');
+  const bytes = (o) => { const n = new Blob([typeof o === 'string' ? o : JSON.stringify(o)]).size; return n > 1024 ? (n / 1024).toFixed(1) + ' КБ' : n + ' Б'; };
+  const usd = (v) => (typeof v === 'number') ? '$' + v.toFixed(v < 0.01 ? 5 : 4) : 'н/д';
+
+  /** A <details> whose JSON body is rendered on first open, so big payloads cost nothing until clicked. */
+  function lazyJson(title, value, open) {
+    const d = el('details', open ? { open: '' } : {}, [el('summary', { text: title + ' · ' + bytes(value) })]);
+    let done = false;
+    const fill = () => {
+      if (done) return; done = true;
+      const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+      const box = el('pre', { text });
+      const copy = el('button', { type: 'button', text: 'Копировать' });
+      copy.addEventListener('click', () => { navigator.clipboard && navigator.clipboard.writeText(text); });
+      d.appendChild(copy); d.appendChild(box);
+    };
+    d.addEventListener('toggle', () => { if (d.open) fill(); });
+    if (open) fill();
+    return d;
+  }
+
+  // ---------- models ----------
+  keyEl.value = load('sessionStorage', 'kairon.orKey', '');
+  keyEl.addEventListener('change', () => save('sessionStorage', 'kairon.orKey', keyEl.value));
+  function fillModels() {
+    const q = filterEl.value.trim().toLowerCase();
+    const selected = modelEl.value || load('localStorage', 'kairon.model', defaultModel);
+    modelEl.textContent = '';
+    const groups = new Map();
+    models.filter((m) => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q)).forEach((m) => {
+      const g = m.preferred ? 'Рекомендованные' : m.id.split('/')[0];
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(m);
+    });
+    groups.forEach((list, g) => {
+      const og = el('optgroup', { label: g + ' (' + list.length + ')' });
+      list.forEach((m) => og.appendChild(el('option', { value: m.id, text: m.id + (m.promptUsdPerMTok !== null ? '  ·  $' + m.promptUsdPerMTok + ' / $' + m.completionUsdPerMTok : '') })));
+      modelEl.appendChild(og);
+    });
+    if ([...modelEl.options].some((o) => o.value === selected)) modelEl.value = selected;
+    showModelInfo();
+  }
+  function showModelInfo() {
+    const m = models.find((x) => x.id === modelEl.value);
+    infoEl.textContent = m ? (m.name + ' · контекст ' + (m.contextLength ? Math.round(m.contextLength / 1000) + 'K' : 'н/д') +
+      ' · вход $' + m.promptUsdPerMTok + ' / выход $' + m.completionUsdPerMTok + ' за 1M токенов') : '';
+  }
+  modelEl.addEventListener('change', () => { save('localStorage', 'kairon.model', modelEl.value); showModelInfo(); });
+  filterEl.addEventListener('input', fillModels);
+  fetch(API + '/kairon/models').then((r) => r.json()).then((j) => {
+    models = j.models; defaultModel = j.default; serverKey = j.serverKey === true;
+    if (serverKey) keyEl.placeholder = 'из .env сервиса';
+    fillModels();
+    infoEl.title = 'Каталог: ' + j.source + ', моделей: ' + j.models.length;
+  }).catch((e) => { infoEl.textContent = 'Каталог моделей недоступен: ' + e; });
+
+  // ---------- idea ----------
+  function buildIdea(scenario) {
+    return {
+      schema: {},
+      context: [{
+        type: 'plan',
+        plan: {
+          title: 'Kairon forecast variants',
+          description: 'Baseline, LLM-proposed patches, Kairon evaluate, explanation',
+          reasoning: 'DEV-1364 prototype: the LLM proposes, the server computes.',
+          calls: [
+            { _tool: 'kairon.baseline', _outputPath: '†state.baseline' },
+            { _tool: 'kairon.proposeVariants', _outputPath: '†state.proposals', scenario: scenario,
+              baseline: '†state.baseline', history: history.slice(-3), count: Number(countEl.value) },
+            { _tool: 'kairon.scoreVariants', _outputPath: '†state.scored',
+              baseline: '†state.baseline', proposals: '†state.proposals' },
+            { _tool: 'kairon.explainVariants', _outputPath: '†state.explanation', scenario: scenario,
+              scored: '†state.scored' }
+          ]
+        }
+      }],
+      solution: null
+    };
+  }
+
+  // ---------- answer ----------
+  const fact = (facts, key) => facts[key] !== undefined ? facts[key] : 'н/д';
+
+  function renderTable(scored, reco) {
+    const partners = scored.approved.partners;
+    const head = el('tr', {}, [el('th', { text: 'Вариант' }), el('th', { text: 'Статус' })]
+      .concat(partners.map((p) => el('th', { text: 'IRR ' + p.name })))
+      .concat([el('th', { text: 'Чистая прибыль' }), el('th', { text: 'LTV банка' }), el('th', { text: 'Выход' })]));
+    const rows = [{ key: 'approved', title: 'Утверждённый бюджет (обещание)', status: 'ok' },
+      { key: 'active', title: 'Текущий прогноз до сценария', status: 'ok' }];
+    scored.ranking.forEach((id) => {
+      const v = scored.variants.find((x) => x.id === id);
+      if (v) rows.push({ key: v.id, title: v.id + ' · ' + v.title, status: v.status, v });
+    });
+    const body = rows.map((r) => {
+      const cells = [el('td', { text: r.title })];
+      const statusText = r.v ? ({ ok: 'посчитан', refused: 'отказ сервера ' + (r.v.httpStatus || ''), invalid: 'не прошёл проверку' })[r.status] : '';
+      cells.push(el('td', { class: 'st-' + r.status, text: statusText }));
+      if (r.status !== 'ok') {
+        return el('tr', {}, cells.concat([el('td', { colspan: String(partners.length + 3), class: 'wrapcell st-' + r.status, text: (r.v.errors || []).join('; ') })]));
+      }
+      partners.forEach((p) => {
+        const gap = r.key === 'approved' ? '' : fact(scored.facts, r.key + '.gap.' + p.partnerId);
+        cells.push(el('td', {}, [fact(scored.facts, r.key + '.irr.' + p.partnerId), gap ? el('div', { class: gap.charAt(0) === '-' ? 'neg' : 'pos', text: gap }) : null]));
+      });
+      cells.push(el('td', { text: fact(scored.facts, r.key + '.netProfit') }));
+      cells.push(el('td', { text: fact(scored.facts, r.key + '.ltv') }));
+      cells.push(el('td', { text: fact(scored.facts, r.key + '.exitMonth') }));
+      return el('tr', { class: r.key === reco ? 'reco' : null }, cells);
+    });
+    return el('div', { class: 'tablewrap' }, [el('table', { class: 'answer' }, [el('thead', {}, [head]), el('tbody', {}, body)])]);
+  }
+
+  function renderChart(scored) {
+    const partners = scored.approved.partners;
+    const rows = [{ label: 'текущий', metrics: scored.active }];
+    scored.ranking.forEach((id) => {
+      const v = scored.variants.find((x) => x.id === id);
+      if (v && v.metrics) rows.push({ label: v.id, metrics: v.metrics });
+    });
+    const colors = ['--c1', '--c2'];
+    const values = [1];
+    rows.forEach((r) => r.metrics.partners.forEach((p) => { if (p.irr !== null) values.push(p.irr * 100); }));
+    partners.forEach((p) => { if (p.irr !== null) values.push(p.irr * 100); });
+    const max = Math.ceil(Math.max.apply(null, values) / 5) * 5;
+    const W = 640, H = 220, L = 36, B = 28, T = 10, plotW = W - L - 10, plotH = H - B - T;
+    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', role: 'img', 'aria-label': 'IRR партнёров по вариантам против обещания' });
+    for (let g = 0; g <= max; g += 5) {
+      const y = T + plotH - (g / max) * plotH;
+      svg.appendChild(svgEl('line', { x1: L, x2: W - 10, y1: y, y2: y }, { stroke: 'var(--line)' }));
+      const t = svgEl('text', { x: L - 6, y: y + 4, 'text-anchor': 'end' }, { fill: 'var(--muted)' });
+      t.textContent = g + ' %'; svg.appendChild(t);
+    }
+    const groupW = plotW / rows.length, barW = Math.min(28, (groupW - 16) / partners.length);
+    rows.forEach((r, i) => {
+      const x0 = L + i * groupW + (groupW - barW * partners.length) / 2;
+      partners.forEach((p, j) => {
+        const m = r.metrics.partners.find((q) => q.partnerId === p.partnerId);
+        if (!m || m.irr === null) return;
+        const h = (m.irr * 100 / max) * plotH;
+        svg.appendChild(svgEl('rect', { x: x0 + j * barW, y: T + plotH - h, width: barW - 3, height: h, rx: 2 }, { fill: 'var(' + colors[j % 2] + ')' }));
+      });
+      const lbl = svgEl('text', { x: L + i * groupW + groupW / 2, y: H - 8, 'text-anchor': 'middle' }, { fill: 'var(--ink)' });
+      lbl.textContent = r.label; svg.appendChild(lbl);
+    });
+    partners.forEach((p, j) => {
+      if (p.irr === null) return;
+      const y = T + plotH - (p.irr * 100 / max) * plotH;
+      svg.appendChild(svgEl('line', { x1: L, x2: W - 10, y1: y, y2: y, 'stroke-dasharray': '5 4' }, { stroke: 'var(' + colors[j % 2] + ')', 'stroke-width': '1.5' }));
+    });
+    const legend = el('div', { class: 'legend' }, partners.map((p, j) => {
+      const sw = el('span', { class: 'sw' }); sw.style.background = 'var(' + colors[j % 2] + ')';
+      return el('span', {}, [sw, p.name + ' (пунктир: обещание ' + fact(scored.facts, 'approved.irr.' + p.partnerId) + ')']);
+    }));
+    return el('div', {}, [svg, legend]);
+  }
+
+  function renderVariants(out) {
+    const p = out.proposals, wrap = el('div', {});
+    p.variants.forEach((v) => {
+      const s = out.scored.variants.find((x) => x.id === v.id) || {};
+      wrap.appendChild(el('details', {}, [
+        el('summary', { text: v.id + ' · ' + v.title + ' · рычаги: ' + (v.levers.join(', ') || 'нет') }),
+        el('p', { text: v.rationale }),
+        (s.adjustments || []).length ? el('p', { class: 'warnbox', text: 'Поправки: ' + s.adjustments.join('; ') }) : null,
+        lazyJson('Патч', v.patch, true)
+      ]));
+    });
+    (p.rejected || []).forEach((r) => wrap.appendChild(el('div', { class: 'errbox', text: r.id + ' «' + r.title + '» отклонён проверкой: ' + r.errors.join('; ') })));
+    if ((p.openQuestions || []).length) {
+      wrap.appendChild(el('details', { open: '' }, [el('summary', { text: 'Открытые вопросы LLM' }),
+        el('ul', {}, p.openQuestions.map((q) => el('li', { text: q })))]));
+    }
+    return wrap;
+  }
+
+  function summaryForHistory(out) {
+    const s = out.scored;
+    return s.ranking.map((id) => {
+      const v = s.variants.find((x) => x.id === id);
+      if (!v) return '';
+      if (v.status !== 'ok') return id + ' «' + v.title + '»: отклонён (' + (v.errors[0] || '') + ')';
+      return id + ' «' + v.title + '»: ' + s.approved.partners.map((p) => p.name + ' ' + fact(s.facts, id + '.irr.' + p.partnerId)).join(', ');
+    }).join('; ') + '. Рекомендован ' + (out.explanation.recommendation || 'нет') + '.';
+  }
+
+  // ---------- CFO report (stage 4) ----------
+  // From the general to the specific: the answer, the variants as tabs, then for the
+  // selected one the story, key figures, timeline, cash, funding and the profit bridge.
+  // Every figure comes from Kairon evaluate (scoreVariants.diff and facts); the LLM text
+  // carries them only through placeholders.
+  const MONTHS_RU = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const monthLabel = (m) => m ? MONTHS_RU[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4) : '—';
+  const monthIndex = (m) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1;
+  const NF0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
+  const NF1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const NF2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const money = { decimals: 2, code: 'CZK' };
+  const mln = (minor) => (minor === null || minor === undefined) ? null : Number(minor) / Math.pow(10, money.decimals) / 1e6;
+  const fmtMln = (v) => (v < 0 ? '−' : '') + (Math.abs(v) >= 100 ? NF0.format(Math.abs(v)) : NF1.format(Math.abs(v))) + ' млн';
+  const fmtDeltaMln = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + (Math.abs(v) >= 100 ? NF0.format(Math.abs(v)) : NF1.format(Math.abs(v))) + ' млн';
+  const fmtPct = (x) => NF2.format(x * 100) + ' %';
+  const fmtPp = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + NF2.format(Math.abs(v)) + ' п.п.';
+  const fmtMonths = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v) + ' мес';
+  const colorOf = (id) => id === 'active' ? 'var(--active)' : 'var(--v' + Math.min(Math.max(Number(id.slice(1)) || 1, 1), 4) + ')';
+  const dot = (id) => { const d = el('span', { class: 'dot' }); d.style.background = colorOf(id); return d; };
+  const txt = (x, y, text, attrs) => { const t = svgEl('text', Object.assign({ x: x, y: y }, attrs || {})); t.textContent = text; return t; };
+
+  /** Clean ticks for a value range, always including 0. */
+  function ticks(lo, hi, count) {
+    const lo0 = Math.min(lo, 0), hi0 = Math.max(hi, 0);
+    const raw = (hi0 - lo0) / count || 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((k) => k >= raw) || 10 * mag;
+    const out = [];
+    const end = Math.ceil(hi0 / step - 1e-9) * step;
+    for (let v = Math.floor(lo0 / step + 1e-9) * step; v <= end + step * 0.001; v += step) out.push(Math.round(v * 1e6) / 1e6);
+    return out;
+  }
+
+  function section(title, sub, body) {
+    return el('div', { class: 'r-sec' }, [el('h4', { text: title }), sub ? el('div', { class: 'sub', text: sub }) : null, body]);
+  }
+
+  function irrBullet(promise, active, delayOnly, value, color) {
+    const W = 200, H = 22;
+    const vals = [promise, active, delayOnly, value].filter((x) => x !== null && x !== undefined);
+    const lo = Math.min.apply(null, vals) - 0.006, hi = Math.max.apply(null, vals) + 0.006;
+    const x = (v) => 6 + (v - lo) / (hi - lo) * (W - 12);
+    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, width: '100%', height: H, class: 'vchart', role: 'img',
+      'aria-label': 'IRR: обещание ' + fmtPct(promise) + ', активный ' + fmtPct(active) + ', вариант ' + fmtPct(value) });
+    svg.appendChild(svgEl('line', { x1: 2, x2: W - 2, y1: 11, y2: 11 }, { stroke: 'var(--grid)', 'stroke-width': '1' }));
+    svg.appendChild(svgEl('line', { x1: x(promise), x2: x(promise), y1: 2, y2: 20 }, { stroke: 'var(--ink)', 'stroke-width': '2', 'stroke-linecap': 'round' }));
+    svg.appendChild(svgEl('circle', { cx: x(active), cy: 11, r: 4 }, { fill: 'var(--panel)', stroke: 'var(--active)', 'stroke-width': '2' }));
+    if (delayOnly !== null && delayOnly !== undefined) svg.appendChild(svgEl('circle', { cx: x(delayOnly), cy: 11, r: 3 }, { fill: 'var(--v1)', stroke: 'var(--panel)', 'stroke-width': '1.5' }));
+    svg.appendChild(svgEl('circle', { cx: x(value), cy: 11, r: 5.5 }, { fill: color, stroke: 'var(--panel)', 'stroke-width': '2' }));
+    return svg;
+  }
+
+  function bulletKey() {
+    const mark = (draw) => { const s = svgEl('svg', { width: 14, height: 14, viewBox: '0 0 14 14' }); draw(s); return s; };
+    return el('div', { class: 'key' }, [
+      el('span', {}, [mark((s) => s.appendChild(svgEl('line', { x1: 7, x2: 7, y1: 1, y2: 13 }, { stroke: 'var(--ink)', 'stroke-width': '2' }))), ' обещание (утверждённый бюджет)']),
+      el('span', {}, [mark((s) => s.appendChild(svgEl('circle', { cx: 7, cy: 7, r: 4 }, { fill: 'var(--panel)', stroke: 'var(--active)', 'stroke-width': '2' }))), ' активный прогноз']),
+      el('span', {}, [mark((s) => s.appendChild(svgEl('circle', { cx: 7, cy: 7, r: 3 }, { fill: 'var(--v1)' }))), ' v1: только сценарий']),
+      el('span', {}, [mark((s) => s.appendChild(svgEl('circle', { cx: 7, cy: 7, r: 5 }, { fill: 'var(--muted)' }))), ' вариант (цвет карточки)'])
+    ]);
+  }
+
+  function variantCard(v, ctx, selected) {
+    const card = el('button', { class: 'vcard', role: 'tab', type: 'button', 'aria-selected': String(selected) });
+    card.style.setProperty('--vc', colorOf(v.id));
+    const irrOf = (metrics, pid) => { const p = metrics ? metrics.partners.find((q) => q.partnerId === pid) : null; return p ? p.irr : null; };
+    const rows = ctx.promise.partners.map((p) => {
+      const value = irrOf(v.metrics, p.partnerId);
+      const gap = value !== null && p.irr !== null ? (value - p.irr) * 100 : null;
+      return el('div', { class: 'irr-row' }, [
+        el('span', { text: p.name.split(' ')[0] }),
+        irrBullet(p.irr, irrOf(ctx.active, p.partnerId), v.id === 'v1' ? null : irrOf(ctx.v1 ? ctx.v1.metrics : null, p.partnerId), value, colorOf(v.id)),
+        el('span', { class: 'v' }, [value === null ? 'н/д' : fmtPct(value), gap === null ? null : el('div', { class: 'dl ' + (gap >= 0 ? 'good' : 'bad'), text: fmtPp(gap) + ' к обещ.' })])
+      ]);
+    });
+    const d = v.diff;
+    const netDelta = d ? mln(d.profit.variantNetMinor) - mln(d.profit.activeNetMinor) : null;
+    const exitEvent = d ? d.events.find((e) => e.key === 'exit') : null;
+    card.appendChild(el('div', { class: 'vc-head' }, [dot(v.id), el('b', { text: v.id }), v.id === ctx.reco ? el('span', { class: 'badge-reco', text: 'рекомендуем' }) : null]));
+    card.appendChild(el('div', { class: 'vc-title', text: v.title }));
+    card.appendChild(el('div', { class: 'chips' }, v.levers.length ? v.levers.map((l) => el('span', { class: 'chip', text: l })) : [el('span', { class: 'chip', text: 'без рычагов: только сценарий' })]));
+    rows.forEach((r) => card.appendChild(r));
+    card.appendChild(el('div', { class: 'vc-foot' }, [
+      netDelta === null ? null : el('span', { text: 'чистая прибыль ' + fmtDeltaMln(netDelta) }),
+      exitEvent ? el('span', { text: 'выход ' + monthLabel(exitEvent.variant) }) : null
+    ]));
+    return card;
+  }
+
+  function tile(label, value, was, delta, betterUp, fmt) {
+    let cls = 'flat', arrow = '';
+    if (delta !== null && Math.abs(delta) > 1e-9) {
+      arrow = delta > 0 ? '▲ ' : '▼ ';
+      if (betterUp !== null) cls = (delta > 0) === betterUp ? 'good' : 'bad';
+    }
+    return el('div', { class: 'tile' }, [
+      el('span', { class: 'lbl', text: label }),
+      el('span', { class: 'val', text: value }),
+      delta === null ? null : el('span', { class: 'dl ' + cls, text: arrow + fmt(delta) + ' к активному' }),
+      was ? el('span', { class: 'was', text: 'было ' + was }) : null
+    ]);
+  }
+
+  function kpiTiles(v, d, ctx) {
+    const an = mln(d.profit.activeNetMinor), vn = mln(d.profit.variantNetMinor);
+    const ae = mln(d.profit.activeExitMinor), ve = mln(d.profit.variantExitMinor);
+    const at = d.cash.activeTrough, vt = d.cash.variantTrough;
+    const ap = d.cash.activePositive, vp = d.cash.variantPositive;
+    const ai = mln(d.interest.activeMinor), vi = mln(d.interest.variantMinor);
+    const altv = ctx.active.ltvBp, vltv = v.metrics.ltvBp;
+    return el('div', { class: 'tiles' }, [
+      tile('Чистая прибыль', fmtMln(vn), fmtMln(an), vn - an, true, fmtDeltaMln),
+      ae !== null && ve !== null ? tile('Прибыль на выходе, партнёрам', fmtMln(ve), fmtMln(ae), ve - ae, true, fmtDeltaMln) : null,
+      vt && at ? tile('Дно денег проекта', fmtMln(mln(vt.minor)) + ' · ' + monthLabel(vt.month), fmtMln(mln(at.minor)) + ' · ' + monthLabel(at.month), mln(vt.minor) - mln(at.minor), true, fmtDeltaMln) : null,
+      vp && ap ? tile('Деньги снова в плюсе', monthLabel(vp), monthLabel(ap), monthIndex(vp) - monthIndex(ap), false, fmtMonths) : null,
+      tile('Проценты по источникам', fmtMln(vi), fmtMln(ai), vi - ai, false, fmtDeltaMln),
+      // LTV's denominator is the plan's revenue, so a price lever moves it by assumption: no good/bad colour
+      altv !== null && vltv !== null ? tile('LTV банка (база: выручка плана)', NF2.format(vltv / 100) + ' %', NF2.format(altv / 100) + ' %', (vltv - altv) / 100, null, fmtPp) : null
+    ]);
+  }
+
+  /** Month axis shared by the timeline and the charts: x of a month's centre. */
+  function monthScale(months, left, width) {
+    const first = monthIndex(months[0]), step = width / months.length;
+    return { step: step, x: (m) => left + (monthIndex(m) - first + 0.5) * step, left: left, right: left + width };
+  }
+
+  function closedBand(svg, sc, months, closedThrough, y0, y1) {
+    if (!closedThrough || closedThrough < months[0]) return;
+    const x1 = sc.x(closedThrough) + sc.step / 2;
+    svg.appendChild(svgEl('rect', { x: sc.left, y: y0, width: Math.max(x1 - sc.left, 0), height: y1 - y0 }, { fill: 'var(--closed)' }));
+    svg.appendChild(txt(sc.left + 4, y0 + 12, 'факт по ' + monthLabel(closedThrough)));
+  }
+
+  function yearTicks(svg, sc, months, y0, y1, labelY) {
+    months.forEach((m) => {
+      if (m.slice(5) !== '01') return;
+      const x = sc.x(m) - sc.step / 2;
+      svg.appendChild(svgEl('line', { x1: x, x2: x, y1: y0, y2: y1 }, { stroke: 'var(--grid)', 'stroke-width': '1' }));
+      svg.appendChild(txt(x + 3, labelY, m.slice(0, 4)));
+    });
+  }
+
+  function timeline(v, d, milestones) {
+    const months = d.axis.months, W = 960, L = 120, R = 64, top = 36, rowH = 40;
+    const rows = d.spans, H = top + rows.length * rowH + 26;
+    const sc = monthScale(months, L, W - L - R);
+    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'vchart', role: 'img', 'aria-label': 'Сроки: активный прогноз и вариант ' + v.id });
+    const bottom = top + rows.length * rowH;
+    closedBand(svg, sc, months, d.axis.closedThrough, top - 8, bottom);
+    yearTicks(svg, sc, months, top - 8, bottom, bottom + 16);
+    // milestones of the version, as stored (evaluate does not move them); a label is
+    // drawn only where it does not run into the previous one, the rest show on hover
+    svg.appendChild(txt(L - 10, 17, 'Вехи версии', { class: 'lbl', 'text-anchor': 'end' }));
+    let labelEnd = -Infinity;
+    const shown = (milestones || [])
+      .map((ms) => ({ ms: ms, m: ms.dueDate ? ms.dueDate.slice(0, 7) : null }))
+      .filter((it) => it.m && it.m >= months[0] && it.m <= months[months.length - 1])
+      .sort((a, b) => (a.m < b.m ? -1 : a.m > b.m ? 1 : 0));
+    shown.forEach((it, i) => {
+        const x = sc.x(it.m);
+        const next = shown[i + 1];
+        const nextX = next ? sc.x(next.m) - 8 : W;
+        const g = svgEl('g', {});
+        g.appendChild(svgEl('path', { d: 'M' + x + ' 7 l5 5 l-5 5 l-5 -5 z' }, { fill: it.ms.completedAt ? 'var(--ink)' : 'var(--panel)', stroke: 'var(--ink)', 'stroke-width': '1.5' }));
+        const t = svgEl('title', {}); t.textContent = it.ms.name + ': ' + it.ms.dueDate + (it.ms.completedAt ? ', выполнена' : '') + '. Evaluate не переносит вехи; сдвиг читается по событиям ниже.'; g.appendChild(t);
+        const width = it.ms.name.length * 6.2;
+        if (x + 8 > labelEnd + 10 && x + 8 + width < nextX) {
+          g.appendChild(txt(x + 8, 16, it.ms.name));
+          labelEnd = x + 8 + width;
+        }
+        svg.appendChild(g);
+      });
+    rows.forEach((row, i) => {
+      const y = top + i * rowH;
+      svg.appendChild(txt(L - 10, y + 20, row.label, { class: 'lbl', 'text-anchor': 'end' }));
+      const bar = (span, yy, color, who) => {
+        if (!span) return;
+        const x0 = sc.x(span.from) - sc.step / 2, x1 = sc.x(span.to) + sc.step / 2;
+        const r = svgEl('rect', { x: x0, y: yy, width: Math.max(x1 - x0, 2), height: 7, rx: 3.5 }, { fill: color });
+        const t = svgEl('title', {}); t.textContent = row.label + ', ' + who + ': ' + monthLabel(span.from) + ' — ' + monthLabel(span.to); r.appendChild(t);
+        svg.appendChild(r);
+      };
+      bar(row.active, y + 9, 'var(--axis)', 'активный прогноз');
+      bar(row.variant, y + 20, colorOf(v.id), v.id);
+      if (row.active && row.variant && row.active.to !== row.variant.to) {
+        const shift = monthIndex(row.variant.to) - monthIndex(row.active.to);
+        svg.appendChild(txt(sc.right + 8, y + 27, fmtMonths(shift), { class: 'ink' }));
+      }
+    });
+    // events: hollow = active, filled = variant, joined by a line when they differ
+    const eventRow = { constructionEnd: 1, mainHandover: 0, exit: null };
+    d.events.forEach((ev) => {
+      if (ev.key === 'exit') {
+        [[ev.active, 'var(--axis)', 'выход: активный'], [ev.variant, colorOf(v.id), 'выход: ' + v.id]].forEach(([m, color, who], k) => {
+          if (!m) return;
+          const x = sc.x(m) + sc.step / 2;
+          svg.appendChild(svgEl('line', { x1: x, x2: x, y1: top - 8, y2: bottom }, { stroke: color, 'stroke-width': k === 0 ? '1' : '2' }));
+          if (k === 1) svg.appendChild(txt(x - 4, bottom + 16, 'выход ' + monthLabel(m), { class: 'ink', 'text-anchor': 'end' }));
+        });
+        return;
+      }
+      const ri = eventRow[ev.key];
+      if (ri === null || ri === undefined || !ev.active || !ev.variant) return;
+      const y = top + ri * rowH + 18;
+      const xa = sc.x(ev.active), xv = sc.x(ev.variant);
+      if (xa !== xv) svg.appendChild(svgEl('line', { x1: xa, x2: xv, y1: y, y2: y }, { stroke: 'var(--ink)', 'stroke-width': '1' }));
+      svg.appendChild(svgEl('circle', { cx: xa, cy: y, r: 4.5 }, { fill: 'var(--panel)', stroke: 'var(--ink)', 'stroke-width': '1.5' }));
+      const c = svgEl('circle', { cx: xv, cy: y, r: 5 }, { fill: 'var(--ink)', stroke: 'var(--panel)', 'stroke-width': '2' });
+      const t = svgEl('title', {}); t.textContent = ev.label + ': ' + monthLabel(ev.active) + ' → ' + monthLabel(ev.variant); c.appendChild(t);
+      svg.appendChild(c);
+    });
+    const key = el('div', { class: 'key' }, [
+      el('span', {}, [el('span', { class: 'dot', style: 'background: var(--axis); border-radius: 3px; width: 18px; height: 7px' }), ' активный прогноз']),
+      el('span', {}, [el('span', { class: 'dot', style: 'background: ' + colorOf(v.id) + '; border-radius: 3px; width: 18px; height: 7px' }), ' ' + v.id]),
+      el('span', { text: '○ → ● основная передача и конец стройки: было → стало' })
+    ]);
+    return el('div', {}, [el('div', { class: 'scrollx' }, [el('div', { class: 'chartwrap' }, [svg])]), key]);
+  }
+
+  /** A line chart on the shared month axis with a crosshair tooltip. series: [{label, color, values (minor|null)}]. */
+  function lineChart(opts) {
+    const months = opts.months, W = opts.width || 960, H = opts.height || 240, L = opts.left || 64, R = opts.right || 92, T = 22, B = 26;
+    const sc = monthScale(months, L, W - L - R);
+    const series = opts.series.map((s) => Object.assign({}, s, { mv: s.values.map(mln) }));
+    const all = [];
+    series.forEach((s) => s.mv.forEach((v) => { if (v !== null) all.push(v); }));
+    const tk = ticks(Math.min.apply(null, all), Math.max.apply(null, all), 4);
+    const lo = tk[0], hi = tk[tk.length - 1];
+    const y = (v) => T + (hi - v) / (hi - lo || 1) * (H - T - B);
+    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'vchart', role: 'img', 'aria-label': opts.aria });
+    closedBand(svg, sc, months, opts.closedThrough, T, H - B);
+    tk.forEach((t) => {
+      svg.appendChild(svgEl('line', { x1: L, x2: W - R, y1: y(t), y2: y(t) }, { stroke: t === 0 ? 'var(--axis)' : 'var(--grid)', 'stroke-width': '1' }));
+      svg.appendChild(txt(L - 6, y(t) + 4, (Math.abs(t) >= 1000 ? NF0.format(t) : NF0.format(t)), { 'text-anchor': 'end' }));
+    });
+    yearTicks(svg, sc, months, H - B, H - B + 4, H - 8);
+    series.forEach((s) => {
+      let dpath = '', pen = false;
+      s.mv.forEach((v, i) => {
+        if (v === null) { pen = false; return; }
+        dpath += (pen ? 'L' : 'M') + sc.x(months[i]).toFixed(1) + ' ' + y(v).toFixed(1) + ' ';
+        pen = true;
+      });
+      svg.appendChild(svgEl('path', { d: dpath }, { fill: 'none', stroke: s.color, 'stroke-width': '2', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      let last = -1;
+      s.mv.forEach((v, i) => { if (v !== null) last = i; });
+      if (last >= 0) {
+        svg.appendChild(svgEl('circle', { cx: sc.x(months[last]), cy: y(s.mv[last]), r: 4 }, { fill: s.color, stroke: 'var(--panel)', 'stroke-width': '2' }));
+        if (s.endLabel !== false) svg.appendChild(txt(sc.x(months[last]) + 8, y(s.mv[last]) + 4, s.label, { class: 'ink' }));
+      }
+    });
+    (opts.markers || []).forEach((mk) => {
+      if (!mk || !mk.month || mk.value === null) return;
+      const x = sc.x(mk.month), yy = y(mk.value);
+      svg.appendChild(svgEl('circle', { cx: x, cy: yy, r: 4.5 }, { fill: mk.color, stroke: 'var(--panel)', 'stroke-width': '2' }));
+      svg.appendChild(txt(x + (mk.side === 'left' ? -9 : 9), yy + 4, mk.label, { class: 'ink', 'text-anchor': mk.side === 'left' ? 'end' : 'start' }));
+    });
+    // crosshair + tooltip
+    const wrap = el('div', { class: 'chartwrap' }, [svg]);
+    const tip = el('div', { class: 'tip' });
+    wrap.appendChild(tip);
+    const cross = svgEl('line', { x1: 0, x2: 0, y1: T, y2: H - B }, { stroke: 'var(--muted)', 'stroke-width': '1', visibility: 'hidden' });
+    svg.appendChild(cross);
+    const hit = svgEl('rect', { x: L, y: T, width: W - L - R, height: H - T - B }, { fill: 'transparent' });
+    svg.appendChild(hit);
+    const move = (evt) => {
+      const box = svg.getBoundingClientRect();
+      const vx = (evt.clientX - box.left) / box.width * W;
+      const i = Math.min(Math.max(Math.floor((vx - L) / sc.step), 0), months.length - 1);
+      const x = sc.x(months[i]);
+      cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.style.visibility = 'visible';
+      tip.textContent = '';
+      tip.appendChild(el('b', { text: monthLabel(months[i]) }));
+      series.forEach((s) => tip.appendChild(el('div', {}, [el('span', { class: 'dot', style: 'background:' + s.color + ';margin-right:6px' }), s.label + ': ' + (s.mv[i] === null ? '—' : fmtMln(s.mv[i]))])));
+      tip.style.display = 'block';
+      const px = x / W * box.width;
+      tip.style.left = Math.min(px + 12, box.width - tip.offsetWidth - 4) + 'px';
+      tip.style.top = '4px';
+    };
+    hit.addEventListener('mousemove', move);
+    hit.addEventListener('mouseleave', () => { tip.style.display = 'none'; cross.style.visibility = 'hidden'; });
+    return wrap;
+  }
+
+  function seriesKey(items) {
+    return el('div', { class: 'key' }, items.map((it) => el('span', {}, [el('span', { class: 'dot', style: 'background:' + it.color }), ' ' + it.label])));
+  }
+
+  function cashChart(v, d) {
+    const at = d.cash.activeTrough, vt = d.cash.variantTrough;
+    const sameMonth = at && vt && at.month === vt.month;
+    const chart = lineChart({
+      months: d.axis.months, closedThrough: d.axis.closedThrough, aria: 'Накопленный чистый денежный поток, активный прогноз и ' + v.id,
+      series: [
+        { label: 'активный', color: 'var(--active)', values: d.cash.active, endLabel: false },
+        { label: v.id, color: colorOf(v.id), values: d.cash.variant, endLabel: false }
+      ],
+      markers: [
+        at ? { month: at.month, value: mln(at.minor), color: 'var(--active)', label: 'дно ' + fmtMln(mln(at.minor)) + ', ' + monthLabel(at.month), side: 'left' } : null,
+        vt && !sameMonth ? { month: vt.month, value: mln(vt.minor), color: colorOf(v.id), label: 'дно ' + fmtMln(mln(vt.minor)) + ', ' + monthLabel(vt.month), side: 'right' } : null
+      ]
+    });
+    return el('div', {}, [seriesKey([{ label: 'активный прогноз', color: 'var(--active)' }, { label: v.id, color: colorOf(v.id) }]), el('div', { class: 'scrollx' }, [chart])]);
+  }
+
+  function fundingCharts(v, d) {
+    const grid = el('div', { class: 'smalls' });
+    d.funding.forEach((f) => {
+      const chart = lineChart({
+        months: d.axis.months, closedThrough: d.axis.closedThrough, width: 420, height: 190, left: 52, right: 40,
+        aria: 'Остаток долга: ' + f.name,
+        series: [
+          { label: 'активный', color: 'var(--active)', values: f.active, endLabel: false },
+          { label: v.id, color: colorOf(v.id), values: f.variant, endLabel: false }
+        ]
+      });
+      const lastOf = (arr) => { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] !== null) return arr[i]; return null; };
+      const peak = (arr) => arr.reduce((m, x) => x === null ? m : Math.max(m, mln(x)), 0);
+      grid.appendChild(el('div', {}, [
+        el('h6', { text: f.name + (f.group === 'bank' ? ' · банк' : f.group === 'partner' ? ' · партнёр' : '') }),
+        el('div', { class: 'sub', text: 'пик ' + fmtMln(peak(f.variant)) + ' (было ' + fmtMln(peak(f.active)) + ')' + (lastOf(f.variant) !== null && mln(lastOf(f.variant)) > 0.05 ? ' · на выходе ' + fmtMln(mln(lastOf(f.variant))) : '') }),
+        chart
+      ]));
+    });
+    return el('div', {}, [seriesKey([{ label: 'активный прогноз', color: 'var(--active)' }, { label: v.id, color: colorOf(v.id) }]), grid]);
+  }
+
+  function bridgeChart(v, d) {
+    const rows = d.bridge.filter((r) => r.minor !== '0').map((r) => ({ label: r.label, value: mln(r.minor) }));
+    const an = mln(d.profit.activeNetMinor), vn = mln(d.profit.variantNetMinor);
+    const head = el('div', { class: 'sub', text: 'Чистая прибыль: ' + fmtMln(an) + ' → ' + fmtMln(vn) + ' (' + fmtDeltaMln(vn - an) + ')' });
+    if (rows.length === 0) return el('div', {}, [head, el('div', { class: 'muted', text: 'Строки плана не меняют чистую прибыль.' })]);
+    const W = 760, L = 150, R = 110, rowH = 30, T = 6, H = T + rows.length * rowH + 6;
+    const lo = Math.min(0, Math.min.apply(null, rows.map((r) => r.value))), hi = Math.max(0, Math.max.apply(null, rows.map((r) => r.value)));
+    const x = (val) => L + (val - lo) / (hi - lo || 1) * (W - L - R);
+    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'vchart', role: 'img', 'aria-label': 'Изменение чистой прибыли по группам строк' });
+    svg.appendChild(svgEl('line', { x1: x(0), x2: x(0), y1: 0, y2: H }, { stroke: 'var(--axis)', 'stroke-width': '1' }));
+    rows.forEach((r, i) => {
+      const yy = T + i * rowH;
+      svg.appendChild(txt(L - 10, yy + 19, r.label, { class: 'lbl', 'text-anchor': 'end' }));
+      const x0 = Math.min(x(0), x(r.value)), w = Math.max(Math.abs(x(r.value) - x(0)), 2);
+      const bar = svgEl('rect', { x: x0, y: yy + 7, width: w, height: 16, rx: 3 }, { fill: r.value < 0 ? 'var(--bad-mark)' : 'var(--good-mark)' });
+      const t = svgEl('title', {}); t.textContent = r.label + ': ' + fmtDeltaMln(r.value); bar.appendChild(t);
+      svg.appendChild(bar);
+      svg.appendChild(txt(r.value < 0 ? x(0) + 6 : x0 + w + 6, yy + 19, fmtDeltaMln(r.value), { class: 'ink' }));
+    });
+    const ae = mln(d.profit.activeExitMinor), ve = mln(d.profit.variantExitMinor);
+    const exit = ae !== null && ve !== null ? el('div', { class: 'sub', text: 'Прибыль на выходе для партнёров (после процентов модели источников): ' + fmtMln(ae) + ' → ' + fmtMln(ve) + ' (' + fmtDeltaMln(ve - ae) + ')' }) : null;
+    return el('div', {}, [head, el('div', { class: 'chartwrap', style: 'max-width: 760px' }, [svg]), exit]);
+  }
+
+  function variantPanel(v, ctx) {
+    const t = (ctx.explanation.variants || []).find((x) => x.id === v.id) || null;
+    const d = v.diff;
+    const panel = el('div', { class: 'r-panel', role: 'tabpanel' });
+    panel.appendChild(el('h3', {}, [dot(v.id), v.id + ' · ' + v.title]));
+    const block = (title, text) => el('div', {}, [el('h5', { class: 'eyebrow', text: title }), el('p', { text: text || '—' })]);
+    panel.appendChild(el('div', { class: 'story' }, [
+      block('Что делаем', t ? t.whatWeDo : v.rationale),
+      block('Что сдвигается', t ? t.whatShifts : ''),
+      block('Результат', t ? t.result : '')
+    ]));
+    if (!d) {
+      panel.appendChild(el('div', { class: 'muted', text: 'Диффа против активного прогноза нет: прогон сделан до этапа 4.' }));
+      return panel;
+    }
+    panel.appendChild(kpiTiles(v, d, ctx));
+    panel.appendChild(section('Сроки: что сдвигается', 'Серая полоса: активный прогноз, цветная: ' + v.id + '. Сдвиги прочитаны из ячеек плана; вехи версии evaluate не пересчитывает.', timeline(v, d, ctx.milestones)));
+    panel.appendChild(section('Деньги проекта', 'Накопленный чистый поток с начала проекта, млн ' + money.code + '. Дно: момент наибольшей потребности в деньгах.', cashChart(v, d)));
+    panel.appendChild(section('План финансирования', 'Остаток основного долга по источникам на конец месяца, млн ' + money.code + '.', fundingCharts(v, d)));
+    panel.appendChild(section('Откуда разница в прибыли', 'Изменение по группам строк плана против активного прогноза, млн ' + money.code + '.', bridgeChart(v, d)));
+    if (d.notes.length) panel.appendChild(el('div', { class: 'notes' }, [el('div', { class: 'eyebrow', text: 'Что расчёт не видит (по данным Kairon)' }), el('ul', {}, d.notes.map((n) => el('li', { text: n })))]));
+    return panel;
+  }
+
+  function renderAnswer(box, out) {
+    const b = out.baseline, e = out.explanation, s = out.scored;
+    money.decimals = b.project.decimals; money.code = b.project.currencyCode;
+    const okCount = s.variants.filter((v) => v.status === 'ok').length;
+    box.appendChild(el('ol', { class: 'steps' }, [
+      el('li', { text: 'База: «' + b.forecastVersion.name + '», обещание: «' + b.approvedVersion.name + '», закрыто по ' + b.closedThrough + '.' }),
+      el('li', { text: 'LLM: попыток ' + out.proposals.attempts.length + ', принято вариантов ' + out.proposals.variants.length + ' (' + out.proposals.model + ').' }),
+      el('li', { text: 'Kairon evaluate: посчитано ' + okCount + ' из ' + s.variants.length + '.' })
+    ]));
+    const ranked = s.ranking.map((id) => s.variants.find((v) => v.id === id)).filter((v) => v && v.status === 'ok');
+    const reco = e.recommendation || e.topRanked || (ranked[0] ? ranked[0].id : '');
+    const ctx = { promise: s.approved, active: s.active, v1: ranked.find((v) => v.id === 'v1') || null, reco: reco, explanation: e, milestones: b.milestones };
+    const report = el('section', { class: 'report' });
+    const recoV = ranked.find((v) => v.id === reco);
+    report.appendChild(el('div', {}, [
+      el('div', { class: 'eyebrow', text: 'Ответ финансовому директору · ' + b.project.name }),
+      el('p', { class: 'lead', text: e.headline || e.text || '' }),
+      recoV ? el('div', { class: 'reco-line' }, [el('span', { class: 'vchip' }, [dot(reco), 'Рекомендуем ' + reco + ': ' + recoV.title]), el('span', { text: e.whyRecommended || '' })]) : null,
+      e.topRanked && e.recommendation && e.recommendation !== e.topRanked
+        ? el('div', { class: 'warnbox', text: 'LLM рекомендует ' + e.recommendation + ', а сервер ставит первым ' + e.topRanked + '. Причина LLM: ' + (e.departureReason || 'не названа') })
+        : null
+    ]));
+    if (ranked.length > 0) {
+      const tabs = el('div', { class: 'vcards', role: 'tablist', 'aria-label': 'Варианты' });
+      const holder = el('div', {});
+      const select = (id) => {
+        tabs.querySelectorAll('.vcard').forEach((c) => c.setAttribute('aria-selected', String(c.dataset.id === id)));
+        holder.textContent = '';
+        const v = ranked.find((x) => x.id === id);
+        if (v) holder.appendChild(variantPanel(v, ctx));
+      };
+      ranked.forEach((v) => {
+        const card = variantCard(v, ctx, v.id === reco);
+        card.dataset.id = v.id;
+        card.addEventListener('click', () => select(v.id));
+        tabs.appendChild(card);
+      });
+      report.appendChild(el('div', {}, [el('div', { class: 'eyebrow', text: 'Варианты · IRR партнёров против обещания' }), bulletKey(), tabs]));
+      report.appendChild(holder);
+      select(recoV ? reco : ranked[0].id);
+    }
+    const failed = s.variants.filter((v) => v.status !== 'ok');
+    failed.forEach((v) => report.appendChild(el('div', { class: 'errbox', text: v.id + ' «' + v.title + '» не посчитан: ' + v.errors.join('; ') })));
+    if ((e.caveats || []).length) report.appendChild(el('div', { class: 'caveats' }, [el('div', { class: 'eyebrow', text: 'Оговорки' }), el('ul', {}, e.caveats.map((c) => el('li', { text: c })))]));
+    if (e.unknownPlaceholders.length) report.appendChild(el('div', { class: 'warnbox', text: 'LLM сослалась на несуществующие факты: ' + e.unknownPlaceholders.join(', ') }));
+    if (e.literalNumbers.length) report.appendChild(el('div', { class: 'warnbox', text: 'Числа, написанные LLM, а не взятые из evaluate: ' + e.literalNumbers.join(', ') }));
+    box.appendChild(report);
+    box.appendChild(el('details', {}, [el('summary', { text: 'Все варианты в таблице и на графике IRR' }), renderTable(s, reco), renderChart(s)]));
+    box.appendChild(el('details', {}, [el('summary', { text: 'Патчи и обоснования вариантов (LLM)' }), renderVariants(out)]));
+  }
+
+  // ---------- live progress ----------
+  function createLive(box) {
+    const live = el('div', { class: 'live' });
+    const status = el('div', { class: 'muted', text: 'Запрос отправлен…' });
+    const list = el('ol', {});
+    live.appendChild(status); live.appendChild(list);
+    box.appendChild(live);
+    const tools = new Map(), streams = new Map();
+    let firstToken = null;
+    return {
+      status,
+      onEvent(ev) {
+        const p = ev.payload || {};
+        if (ev.type === 'tool.start') {
+          const li = el('li', {}, [el('span', { class: 'mono', text: p.tool }), el('span', { class: 'badge k-tool', text: p.kind }), el('span', { class: 'muted', text: '  выполняется… t=' + ms(ev.t) })]);
+          tools.set(p.tool, li); list.appendChild(li);
+        } else if (ev.type === 'tool.end' || ev.type === 'tool.error') {
+          const li = tools.get(p.tool);
+          if (li) li.lastChild.textContent = ev.type === 'tool.end' ? '  готово за ' + ms(p.ms) : '  ошибка: ' + p.message;
+        } else if (ev.type === 'llm.request') {
+          const head = el('div', { class: 'k-llm', text: (p.label || p.callId) + ' → ' + p.body.model + ': запрос отправлен t=' + ms(ev.t) + ', жду первый токен…' });
+          const reasoning = el('div', { class: 'stream reasoning' });
+          reasoning.style.display = 'none';
+          const text = el('div', { class: 'stream' });
+          const holder = el('div', {}, [head, reasoning, text]);
+          streams.set(p.callId, { head, text, reasoning, sentAt: ev.t, label: p.label, model: p.body.model });
+          live.appendChild(holder);
+        } else if (ev.type === 'llm.first_byte') {
+          const s = streams.get(p.callId);
+          if (s) s.head.textContent = (s.label || p.callId) + ' → ' + s.model + ': первые байты через ' + ms(p.ms) + ', жду первый токен…';
+        } else if (ev.type === 'llm.first_reasoning') {
+          const s = streams.get(p.callId);
+          if (s) s.head.textContent = (s.label || p.callId) + ' → ' + s.model + ': модель рассуждает с ' + ms(p.ms) + ', ответа ещё нет…';
+        } else if (ev.type === 'llm.reasoning') {
+          const s = streams.get(p.callId);
+          if (s) { s.reasoning.style.display = ''; s.reasoning.textContent += p.text; s.reasoning.scrollTop = s.reasoning.scrollHeight; }
+        } else if (ev.type === 'llm.schema_relaxed') {
+          live.appendChild(el('div', { class: 'warnbox', text: p.callId + ': провайдер отклонил строгую схему (HTTP ' + p.status + '), повтор с упрощённой схемой. Ответ провайдера: ' + p.body.slice(0, 300) }));
+        } else if (ev.type === 'llm.first_token') {
+          const s = streams.get(p.callId);
+          if (firstToken === null) firstToken = ev.t;
+          if (s) s.head.textContent = (s.label || p.callId) + ' → ' + s.model + ': стриминг начался через ' + ms(p.ms) + ' (t=' + ms(ev.t) + ')';
+        } else if (ev.type === 'llm.delta') {
+          const s = streams.get(p.callId);
+          if (s) { s.text.textContent += p.text; s.text.scrollTop = s.text.scrollHeight; }
+        } else if (ev.type === 'llm.done') {
+          const s = streams.get(p.callId);
+          const u = p.usage || {};
+          if (s) s.head.textContent = (s.label || p.callId) + ' → ' + p.model + ': TTFT ' + ms(p.ttftMs) + ', всего ' + ms(p.ms) +
+            ', токены ' + (u.prompt_tokens ?? 'н/д') + ' → ' + (u.completion_tokens ?? 'н/д') + ', ' + usd(u.cost);
+        } else if (ev.type === 'llm.error') {
+          const s = streams.get(p.callId);
+          if (s) { s.head.textContent += '  ошибка ' + p.status; s.text.textContent = p.body; }
+        }
+        status.textContent = 'Идёт выполнение: t=' + ms(ev.t) + (firstToken !== null ? ', первый токен LLM на t=' + ms(firstToken) : '');
+      }
+    };
+  }
+
+  // ---------- trace ----------
+  function groupByTool(events) {
+    const calls = [];
+    let current = null;
+    events.forEach((ev) => {
+      if (ev.type === 'tool.start') { current = { start: ev, end: null, llm: [], kairon: [], attempts: [] }; calls.push(current); return; }
+      if (!current) return;
+      if (ev.type === 'tool.end' || ev.type === 'tool.error') { current.end = ev; current = null; return; }
+      if (ev.type === 'kairon.call') current.kairon.push(ev);
+      if (ev.type === 'llm.request') current.llm.push(ev.payload.callId);
+      if (ev.type === 'kairon.propose.attempt') current.attempts.push(ev.payload);
+    });
+    return calls;
+  }
+
+  function llmCalls(events) {
+    const byId = new Map();
+    events.forEach((ev) => {
+      const p = ev.payload || {};
+      if (!p.callId || ev.type.indexOf('llm.') !== 0) return;
+      if (!byId.has(p.callId)) byId.set(p.callId, { callId: p.callId, deltas: 0 });
+      const c = byId.get(p.callId);
+      if (ev.type === 'llm.request') { c.request = p; c.sentAt = ev.t; }
+      if (ev.type === 'llm.first_byte') c.firstByte = p.ms;
+      if (ev.type === 'llm.first_reasoning') c.firstReasoning = p.ms;
+      if (ev.type === 'llm.reasoning') c.reasoningChunks = (c.reasoningChunks || 0) + 1;
+      if (ev.type === 'llm.schema_relaxed') c.relaxed = p;
+      if (ev.type === 'llm.first_token') { c.firstAt = ev.t; c.ttft = p.ms; }
+      if (ev.type === 'llm.delta') c.deltas++;
+      if (ev.type === 'llm.done') { c.done = p; c.doneAt = ev.t; }
+      if (ev.type === 'llm.error') { c.error = p; c.doneAt = ev.t; }
+    });
+    return [...byId.values()];
+  }
+
+  function kv(pairs) { return el('div', { class: 'kv' }, pairs.flatMap(([k, v]) => [el('span', { text: k }), el('span', { class: 'mono', text: String(v) })])); }
+
+  function renderLlmCall(c) {
+    const body = c.request ? c.request.body : {};
+    const rf = body.response_format || null;
+    const u = (c.done && c.done.usage) || {};
+    return el('div', { class: 'card' }, [
+      el('div', { class: 'head' }, [el('b', { class: 'k-llm', text: c.callId }), el('span', { text: c.request ? (c.request.label || '') : '' }), el('span', { class: 'muted', text: body.model || '' })]),
+      kv([
+        ['POST', c.request ? c.request.url : 'н/д'],
+        ['отправлен', 't=' + ms(c.sentAt)],
+        ['первые байты стрима', c.firstByte !== undefined ? 'через ' + ms(c.firstByte) : 'не пришли'],
+        ['рассуждение модели', c.firstReasoning !== undefined ? 'с ' + ms(c.firstReasoning) + ', чанков ' + c.reasoningChunks + ', символов ' + (c.done ? c.done.reasoningChars : 'н/д') : 'нет'],
+        ['первый токен ответа', c.firstAt !== undefined ? 't=' + ms(c.firstAt) + ' (TTFT ' + ms(c.ttft) + ')' : 'не пришёл'],
+        ['завершён', c.doneAt !== undefined ? 't=' + ms(c.doneAt) + (c.done ? ' (всего ' + ms(c.done.ms) + ')' : '') : 'н/д'],
+        ['чанков стрима', c.deltas],
+        ['finish_reason', c.done ? c.done.finishReason : (c.error ? 'ошибка ' + c.error.status : 'н/д')],
+        ['токены вход / выход', (u.prompt_tokens ?? 'н/д') + ' / ' + (u.completion_tokens ?? 'н/д')],
+        ['стоимость', usd(u.cost)],
+        ['generation id', c.done ? (c.done.id || 'н/д') : 'н/д'],
+        ['response_format', rf ? rf.type + (rf.json_schema ? ' · ' + rf.json_schema.name + ' · strict=' + rf.json_schema.strict : '') : 'нет']
+      ]),
+      lazyJson('Тело запроса к OpenRouter (сырое, ключ только в заголовке)', body),
+      rf && rf.json_schema ? lazyJson('JSON-схема ответа (response_format.json_schema.schema)', rf.json_schema.schema) : null,
+      lazyJson('Сообщения (messages)', body.messages || []),
+      c.done ? lazyJson('Сырой ответ модели (content)', c.done.content) : null,
+      c.done ? lazyJson('Usage', c.done.usage) : null,
+      c.error ? lazyJson('Ошибка провайдера', c.error) : null,
+      c.relaxed ? el('div', { class: 'warnbox', text: 'Провайдер отклонил строгую схему, следующий вызов шёл с упрощённой.' }) : null
+    ]);
+  }
+
+  function renderTrace(events, runRequest, solution) {
+    const calls = groupByTool(events);
+    const llms = llmCalls(events);
+    const kairon = events.filter((e) => e.type === 'kairon.call');
+    const last = events[events.length - 1];
+    const firstToken = events.find((e) => e.type === 'llm.first_token');
+    const usage = llms.reduce((a, c) => {
+      const u = (c.done && c.done.usage) || {};
+      a.inTok += u.prompt_tokens || 0; a.outTok += u.completion_tokens || 0; a.cost += u.cost || 0; return a;
+    }, { inTok: 0, outTok: 0, cost: 0 });
+
+    const root = el('details', {}, [el('summary', { text: 'Технические детали: ' + calls.length + ' tool calls, ' + llms.length + ' вызовов LLM, ' + kairon.length + ' вызовов Kairon, ' + events.length + ' событий' })]);
+    root.appendChild(kv([
+      ['всего', ms(last ? last.t : null)],
+      ['первый токен LLM', firstToken ? 't=' + ms(firstToken.t) : 'не было'],
+      ['токены LLM вход / выход', usage.inTok + ' / ' + usage.outTok],
+      ['стоимость LLM', usd(usage.cost)]
+    ]));
+
+    const toolbar = el('div', { class: 'toolbar' });
+    const dl = el('button', { type: 'button', text: 'Скачать трассировку (.ndjson)' });
+    dl.addEventListener('click', () => {
+      const blob = new Blob([events.map((e) => JSON.stringify(e)).join('\n') + '\n'], { type: 'application/x-ndjson' });
+      const a = el('a', { href: URL.createObjectURL(blob), download: 'kairon-run-' + new Date().toISOString().slice(0, 19).split(':').join('-') + '.ndjson' });
+      document.body.appendChild(a); a.click(); a.remove();
+    });
+    toolbar.appendChild(dl);
+    root.appendChild(toolbar);
+
+    // 1. raw request
+    root.appendChild(el('h4', { text: '1. Запрос к сервису: POST ' + (API || location.origin) + '/kairon/run' }));
+    root.appendChild(lazyJson('Тело запроса (сырое, API-ключ скрыт)', runRequest));
+    root.appendChild(lazyJson('План (PlanMessage.plan.calls): какие tools и с какими аргументами', runRequest.idea.context[0].plan.calls));
+
+    // 2. tool calls
+    root.appendChild(el('h4', { text: '2. Tool calls (' + calls.length + ')' }));
+    calls.forEach((c, i) => {
+      const p = c.start.payload, end = c.end ? c.end.payload : null;
+      const card = el('div', { class: 'card' }, [
+        el('div', { class: 'head' }, [
+          el('b', { class: 'k-tool', text: '#' + (i + 1) + ' ' + p.tool }), el('span', { class: 'badge k-tool', text: p.kind }),
+          el('span', { class: 'muted', text: 'старт t=' + ms(c.start.t) + ', ' + (end ? (c.end.type === 'tool.end' ? 'длительность ' + ms(end.ms) : 'ошибка: ' + end.message) : 'не завершён') }),
+          el('span', { class: 'muted', text: 'LLM: ' + c.llm.length + ', Kairon: ' + c.kairon.length })
+        ]),
+        lazyJson('Input JSON schema', p.inputSchema),
+        lazyJson('Аргументы (после подстановки †state)', p.args),
+        end && c.end.type === 'tool.end' ? lazyJson('Результат (output → state)', end.output) : null,
+        c.attempts.length ? lazyJson('Попытки LLM и ошибки проверки', c.attempts) : null
+      ]);
+      if (c.llm.length) {
+        const sub = el('details', {}, [el('summary', { text: 'Вызовы LLM внутри (' + c.llm.length + ')' })]);
+        c.llm.forEach((id) => { const lc = llms.find((x) => x.callId === id); if (lc) sub.appendChild(renderLlmCall(lc)); });
+        card.appendChild(sub);
+      }
+      if (c.kairon.length) {
+        const sub = el('details', {}, [el('summary', { text: 'Вызовы Kairon внутри (' + c.kairon.length + ')' })]);
+        c.kairon.forEach((k) => sub.appendChild(kaironRow(k)));
+        card.appendChild(sub);
+      }
+      root.appendChild(card);
+    });
+
+    // 3. LLM calls
+    root.appendChild(el('h4', { text: '3. Вызовы LLM (' + llms.length + ')' }));
+    llms.forEach((c) => root.appendChild(renderLlmCall(c)));
+
+    // 4. Kairon calls
+    root.appendChild(el('h4', { text: '4. Вызовы Kairon API (' + kairon.length + ')' }));
+    kairon.forEach((k) => root.appendChild(kaironRow(k)));
+
+    // 5. timeline
+    root.appendChild(el('h4', { text: '5. Таймлайн событий' }));
+    root.appendChild(renderTimeline(events));
+
+    // 6. raw solution
+    root.appendChild(el('h4', { text: '6. Сырой результат (Solution)' }));
+    root.appendChild(solution ? lazyJson('solution: meta, calls, output', solution) : el('div', { class: 'muted', text: 'нет' }));
+    return root;
+  }
+
+  function kaironRow(k) {
+    const p = k.payload;
+    return el('div', { class: 'card' }, [
+      el('div', { class: 'head' }, [
+        el('b', { class: 'k-kairon', text: p.method + ' ' + p.op }),
+        el('span', { class: 'mono muted', text: p.path }),
+        el('span', { class: p.status === 200 ? 'st-ok' : 'st-refused', text: 'HTTP ' + (p.status === null ? 'ошибка' : p.status) }),
+        el('span', { class: 'muted', text: ms(p.ms) + ', t=' + ms(k.t) })
+      ]),
+      p.requestBody !== undefined ? lazyJson('Тело запроса', p.requestBody) : null,
+      p.response !== undefined ? lazyJson(p.op === 'listVersions' ? 'Ответ (сокращён: без планов)' : 'Ответ', p.response) : null,
+      p.error ? el('div', { class: 'errbox', text: p.error }) : null
+    ]);
+  }
+
+  function renderTimeline(events) {
+    const rows = [];
+    let pending = null;
+    const flush = () => { if (pending) { rows.push(pending); pending = null; } };
+    events.forEach((ev) => {
+      if (ev.type === 'llm.delta' || ev.type === 'llm.reasoning') {
+        if (pending && pending.callId === ev.payload.callId && pending.type === ev.type) { pending.count++; pending.tEnd = ev.t; pending.chars += ev.payload.text.length; return; }
+        flush(); pending = { delta: true, type: ev.type, callId: ev.payload.callId, count: 1, t: ev.t, tEnd: ev.t, chars: ev.payload.text.length }; return;
+      }
+      flush(); rows.push(ev);
+    });
+    flush();
+    const kindOf = (type) => type.indexOf('llm.') === 0 ? 'k-llm' : type.indexOf('kairon.') === 0 ? 'k-kairon' : type.indexOf('tool.') === 0 ? 'k-tool' : 'k-run';
+    const shortOf = (ev) => {
+      const p = ev.payload || {};
+      switch (ev.type) {
+        case 'run.start': return 'model ' + p.request.providerConfig.model;
+        case 'tool.start': return p.tool;
+        case 'tool.end': return p.tool + ' за ' + ms(p.ms);
+        case 'tool.error': return p.tool + ': ' + p.message;
+        case 'llm.request': return p.callId + ' ' + (p.label || '') + ' · ' + p.body.model;
+        case 'llm.first_byte': return p.callId + ' первые байты через ' + ms(p.ms);
+        case 'llm.first_reasoning': return p.callId + ' рассуждение с ' + ms(p.ms);
+        case 'llm.schema_relaxed': return p.callId + ' HTTP ' + p.status + ': повтор с упрощённой схемой';
+        case 'llm.first_token': return p.callId + ' TTFT ' + ms(p.ms);
+        case 'llm.done': return p.callId + ' за ' + ms(p.ms) + ', ' + p.content.length + ' символов';
+        case 'llm.error': return p.callId + ' HTTP ' + p.status;
+        case 'kairon.call': return p.method + ' ' + p.op + ' → ' + p.status + ' за ' + ms(p.ms);
+        case 'kairon.propose.attempt': return 'попытка ' + p.attempt + ', ошибок ' + p.errors.length;
+        case 'run.done': return 'готово за ' + ms(p.ms);
+        case 'run.error': return p.class + ': ' + p.message;
+        default: return '';
+      }
+    };
+    const tbody = el('tbody', {});
+    rows.forEach((ev) => {
+      if (ev.delta) {
+        tbody.appendChild(el('tr', {}, [el('td', { text: 't=' + ms(ev.t) }), el('td', { class: 'left k-llm', text: ev.type + ' ×' + ev.count }),
+          el('td', { class: 'left mono', text: ev.callId + ': ' + ev.chars + ' символов до t=' + ms(ev.tEnd) })]));
+        return;
+      }
+      const detail = el('td', { class: 'left' }, [el('span', { class: 'mono', text: shortOf(ev) })]);
+      const tr = el('tr', {}, [el('td', { text: 't=' + ms(ev.t) }), el('td', { class: 'left ' + kindOf(ev.type), text: ev.type }), detail]);
+      detail.appendChild(lazyJson('JSON', ev.payload));
+      tbody.appendChild(tr);
+    });
+    return el('div', { class: 'tablewrap' }, [el('table', {}, [
+      el('thead', {}, [el('tr', {}, [el('th', { text: 't' }), el('th', { class: 'left', text: 'событие' }), el('th', { class: 'left', text: 'кратко' })])]), tbody])]);
+  }
+
+  // ---------- run ----------
+  async function send() {
+    const scenario = inputEl.value.trim();
+    if (!scenario) return;
+    if (!keyEl.value && !serverKey && modelEl.value !== SAMPLE_MODEL) { keyEl.focus(); return; }
+    chat.appendChild(el('div', { class: 'msg user', text: scenario }));
+    const box = el('div', { class: 'msg' });
+    chat.appendChild(box);
+    const live = createLive(box);
+    window.scrollTo(0, document.body.scrollHeight);
+    sendEl.disabled = true;
+    const events = [];
+    let runRequest = null, solution = null, failure = null;
+    try {
+      const resp = await fetch(API + '/kairon/run', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ idea: buildIdea(scenario), providerConfig: { model: modelEl.value, apiKey: keyEl.value } })
+      });
+      if (!resp.ok || !resp.body) {
+        const text = await resp.text();
+        throw new Error('HTTP ' + resp.status + ': ' + text);
+      }
+      const reader = resp.body.getReader(), decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        for (let nl = buffer.indexOf('\n'); nl !== -1; nl = buffer.indexOf('\n')) {
+          const line = buffer.slice(0, nl); buffer = buffer.slice(nl + 1);
+          if (!line) continue;
+          const ev = JSON.parse(line);
+          events.push(ev);
+          if (ev.type === 'run.start') runRequest = ev.payload.request;
+          if (ev.type === 'run.done') solution = ev.payload.solution;
+          if (ev.type === 'run.error') failure = ev.payload.class + ': ' + ev.payload.message;
+          live.onEvent(ev);
+        }
+      }
+    } catch (err) {
+      failure = String(err);
+    }
+    const last = events[events.length - 1];
+    live.status.textContent = (failure ? 'Ошибка' : 'Готово') + ' за ' + ms(last ? last.t : null) + ', событий: ' + events.length;
+    if (failure) box.appendChild(el('div', { class: 'errbox', text: failure }));
+    if (solution) {
+      const out = solution.output;
+      renderAnswer(box, out);
+      history.push({ user: scenario, summary: summaryForHistory(out) });
+      inputEl.value = '';
+    }
+    if (runRequest) box.appendChild(renderTrace(events, runRequest, solution));
+    sendEl.disabled = false;
+  }
+  sendEl.addEventListener('click', send);
+
+  /** Replays a saved run (.ndjson from the trace's download button) without calling the server. */
+  async function replay(file) {
+    const events = (await file.text()).split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l));
+    const start = events.find((ev) => ev.type === 'run.start');
+    const done = events.find((ev) => ev.type === 'run.done');
+    const runRequest = start ? start.payload.request : null;
+    const calls = runRequest ? runRequest.idea.context[0].plan.calls : [];
+    const scenario = (calls.find((c) => c._tool === 'kairon.proposeVariants') || {}).scenario || file.name;
+    chat.appendChild(el('div', { class: 'msg user', text: scenario + '\n\n(сохранённый прогон: ' + file.name + ')' }));
+    const box = el('div', { class: 'msg' });
+    chat.appendChild(box);
+    if (done) renderAnswer(box, done.payload.solution.output);
+    else box.appendChild(el('div', { class: 'errbox', text: 'В файле нет run.done: прогон не завершился.' }));
+    if (runRequest) box.appendChild(renderTrace(events, runRequest, done ? done.payload.solution : null));
+  }
+  replayEl.addEventListener('change', () => { const f = replayEl.files && replayEl.files[0]; if (f) replay(f).catch((e) => chat.appendChild(el('div', { class: 'msg errbox', text: String(e) }))); replayEl.value = ''; });
+  inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+{
+ "name": "delay-3",
+ "stretch": [
+  {
+   "lineCodes": [
+    "D5",
+    "D8"
+   ],
+   "fromMonth": "2026-09",
+   "byMonths": 3
+  }
+ ],
+ "shift": [
+  {
+   "lineCodes": [
+    "R1",
+    "R4",
+    "C1",
+    "C2",
+    "O4",
+    "U2",
+    "F7"
+   ],
+   "fromMonth": "2028-03",
+   "byMonths": 3
+  }
+ ],
+ "extend": [
+  {
+   "lineCodes": [
+    "O3",
+    "O5",
+    "F1",
+    "F2",
+    "F3"
+   ],
+   "months": 3
+  }
+ ],
+ "monthRangeTo": "2028-10"
+}

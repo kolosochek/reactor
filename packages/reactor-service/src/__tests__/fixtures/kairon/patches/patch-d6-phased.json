@@ -1,0 +1,53 @@
+{
+ "name": "d6-phased",
+ "stretch": [
+  {
+   "lineCodes": [
+    "D5",
+    "D8"
+   ],
+   "fromMonth": "2026-09",
+   "byMonths": 6
+  }
+ ],
+ "shift": [
+  {
+   "lineCodes": [
+    "R1",
+    "R4",
+    "C1",
+    "C2",
+    "O4",
+    "U2",
+    "F7"
+   ],
+   "fromMonth": "2028-05",
+   "byMonths": 6
+  },
+  {
+   "lineCodes": [
+    "R1",
+    "R4",
+    "C1",
+    "C2",
+    "O4"
+   ],
+   "fromMonth": "2028-03",
+   "toMonth": "2028-04",
+   "byMonths": 3
+  }
+ ],
+ "extend": [
+  {
+   "lineCodes": [
+    "O3",
+    "O5",
+    "F1",
+    "F2",
+    "F3"
+   ],
+   "months": 6
+  }
+ ],
+ "monthRangeTo": "2029-01"
+}

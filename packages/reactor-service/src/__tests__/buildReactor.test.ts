@@ -21,6 +21,18 @@ describe('buildReactor', () => {
     expect(reactor.hasTool('answerQuestions')).toBe(true);
   });
 
+  it('mounts the Kairon forecast adapter without reading Kairon env at build time', () => {
+    // SCENARIO: DEV-1364 prototype tools sit next to text-tools; the Kairon client is created on first use
+    // INPUT: mock LLMProvider + InMemoryRepositories, no KAIRON_* env needed
+    // EXPECTED: the 4 kairon.* tools are registered
+    const reactor = buildReactor(mockLLM, new InMemoryRepositories());
+
+    expect(reactor.hasTool('kairon.baseline')).toBe(true);
+    expect(reactor.hasTool('kairon.proposeVariants')).toBe(true);
+    expect(reactor.hasTool('kairon.scoreVariants')).toBe(true);
+    expect(reactor.hasTool('kairon.explainVariants')).toBe(true);
+  });
+
   it('uses the provided RepositoriesProvider via adapter.repositories override', () => {
     // SCENARIO: factory passes the supplied repositories through to Reactor.use()
     // INPUT: mock LLM + a specific InMemoryRepositories instance

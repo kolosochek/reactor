@@ -1,0 +1,67 @@
+// packages/reactor-service/src/kairon/adapter.ts
+//
+// Reactor adapter of the Kairon forecast prototype (DEV-1364). The Kairon
+// client is created on first use, so building a Reactor needs no KAIRON_* env.
+
+import type { Adapter, Tool } from '@kolosochek/reactor-core';
+import { createKaironActivities, kaironToolInputSchemas } from './activities.js';
+import { sharedKaironClient, type KaironApi } from './client.js';
+
+export const kaironForecastTools: Tool[] = [
+  {
+    name: 'kairon.baseline',
+    inputSchema: kaironToolInputSchemas['kairon.baseline'] as Tool['inputSchema'],
+    description:
+      'Read the project baseline from Kairon: forecast and approved versions evaluated, closed month, derived lines, milestones, partner IRR, plan digest.',
+    category: 'query',
+    type: 'explicit',
+  },
+  {
+    name: 'kairon.proposeVariants',
+    inputSchema: kaironToolInputSchemas['kairon.proposeVariants'] as Tool['inputSchema'],
+    description:
+      'LLM proposes forecast patches for a scenario; each patch is checked against the closed month and derived lines and the LLM retries with the errors.',
+    category: 'transformation',
+    type: 'latent',
+  },
+  {
+    name: 'kairon.scoreVariants',
+    inputSchema: kaironToolInputSchemas['kairon.scoreVariants'] as Tool['inputSchema'],
+    description:
+      'Apply each patch and score it with Kairon evaluate; a 400/422 is recorded as the variant result. Ranks by IRR shortfall against the approved budget.',
+    category: 'aggregation',
+    type: 'explicit',
+  },
+  {
+    name: 'kairon.explainVariants',
+    inputSchema: kaironToolInputSchemas['kairon.explainVariants'] as Tool['inputSchema'],
+    description:
+      'LLM explains the scored variants in Russian, citing figures only as placeholders filled from evaluate.',
+    category: 'transformation',
+    type: 'latent',
+  },
+];
+
+function lazyKaironClient(): KaironApi {
+  return {
+    get projectId() {
+      return sharedKaironClient().projectId;
+    },
+    get pinnedVersionId() {
+      return sharedKaironClient().pinnedVersionId;
+    },
+    getProject: () => sharedKaironClient().getProject(),
+    listVersions: () => sharedKaironClient().listVersions(),
+    getMilestones: (versionId) => sharedKaironClient().getMilestones(versionId),
+    evaluate: (versionId, body) => sharedKaironClient().evaluate(versionId, body),
+  };
+}
+
+export function createKaironForecastAdapter(api: KaironApi = lazyKaironClient()): Adapter {
+  return {
+    name: 'kairon-forecast',
+    version: '0.0.1',
+    tools: kaironForecastTools,
+    activities: createKaironActivities(api),
+  };
+}
