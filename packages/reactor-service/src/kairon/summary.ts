@@ -88,7 +88,8 @@ function irrOf(metrics: EvaluationMetrics, partnerId: string): number | null {
   return metrics.partners.find((p) => p.partnerId === partnerId)?.irr ?? null;
 }
 
-function shortfall(promised: PartnerIrr[], metrics: EvaluationMetrics): number {
+/** The largest IRR shortfall against the promise over the promised partners; Infinity when a partner has no IRR. */
+export function shortfall(promised: PartnerIrr[], metrics: EvaluationMetrics): number {
   let worst = 0;
   for (const p of promised) {
     const irr = irrOf(metrics, p.partnerId);
@@ -99,7 +100,8 @@ function shortfall(promised: PartnerIrr[], metrics: EvaluationMetrics): number {
   return worst;
 }
 
-function distance(promised: PartnerIrr[], metrics: EvaluationMetrics): number {
+/** Sum of the IRR distances to the promise; smaller means closer to the promise. */
+export function distance(promised: PartnerIrr[], metrics: EvaluationMetrics): number {
   let sum = 0;
   for (const p of promised) {
     const irr = irrOf(metrics, p.partnerId);
