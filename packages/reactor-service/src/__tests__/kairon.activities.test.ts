@@ -6,7 +6,14 @@ import type { ActivityContext, LLMCompletionRequest, LLMCompletionResponse, LLMP
 import { createKaironActivities } from '../kairon/activities.js';
 import type { Baseline } from '../kairon/baseline.js';
 import type { KaironLLMRequest } from '../kairon/openrouter.js';
-import { baselineEvaluate, fakeKaironApi as fakeApi, readFixture as readJson } from './_helpers/kaironFake.js';
+import { canonicalJson, planHash, type DraftLineage } from '../kairon/lineage.js';
+import {
+  baselineEvaluate,
+  fakeKaironApi as fakeApi,
+  fixtureDoc,
+  readFixture as readJson,
+  stage5Evaluate,
+} from './_helpers/kaironFake.js';
 
 const delay3Patch = readJson('patches/patch-delay-3.json') as Record<string, unknown>;
 
@@ -98,6 +105,143 @@ describe('kairon.proposeVariants', () => {
       { attempt: 1, errors: ['v1: R1: the patch changes closed months 2026-07, 2026-08 (closed through 2026-08); start the change at 2026-09 or later'] },
       { attempt: 2, errors: [] },
     ]);
+  });
+});
+
+describe('kairon.proposeVariants on a stated scenario (stage 5)', () => {
+  const CONSTRUCTION = { type: 'cost_change' as const, lineCodes: ['D5', 'D8'], fromMonth: '2026-09', factorPpm: 1_080_000 };
+  const releaseU2 = ['2026-11', '2027-06', '2028-01', '2028-06'].map((month) => ({ code: 'U2', month, amountMinor: '0' }));
+  const r1 = (factorPpm: number) => ({ lineCodes: ['R1'], fromMonth: '2026-09', factorPpm });
+  const empty = { stretch: [], shift: [], extend: [], scale: [], set: [], monthRangeTo: null, shareTarget: null };
+  const levers = JSON.stringify({
+    variants: [
+      { id: 'v2', title: 'Резерв U2', rationale: 'r', levers: ['резерв'], patch: { ...empty, set: releaseU2 } },
+      { id: 'v3', title: 'Цены +3 %', rationale: 'r', levers: ['цены'], patch: { ...empty, scale: [r1(1_030_000)] } },
+      { id: 'v4', title: 'Резерв и цены', rationale: 'r', levers: ['резерв', 'цены'], patch: { ...empty, scale: [r1(1_023_000)], set: releaseU2 } },
+    ],
+    openQuestions: [],
+  });
+
+  it('builds v1 on the server and asks the LLM for the lever variants only', async () => {
+    // SCENARIO: «Стройка дорожает на 8 % с 2026-09», count 4
+    // INPUT: scenarioSpec cost_change D5, D8 × 1.08; the scripted LLM returns v2..v4
+    // EXPECTED: ids v1..v4; v1 = the scenario alone with leverPatch null; one LLM call asking for 3 variants v2, v3, v4
+    const b = await loadBaseline();
+    const llm = scriptedLlm([levers]);
+    const out = (await createKaironActivities(fakeApi(baselineEvaluate))['kairon.proposeVariants'](
+      { scenario: 'Стройка дорожает на 8 % с 2026-09', baseline: b, count: 4, scenarioSpec: CONSTRUCTION, section: 'S2' },
+      ctxWith(llm),
+    )) as { section: string; variants: Array<{ id: string; parentId: string | null; lineage: DraftLineage }> };
+
+    expect(out.section).toBe('S2');
+    expect(out.variants.map((v) => [v.id, v.parentId])).toEqual([['v1', null], ['v2', null], ['v3', null], ['v4', null]]);
+    expect(out.variants[0]?.lineage).toEqual({ activePlanHash: planHash(fixtureDoc), scenario: CONSTRUCTION, leverPatch: null, steps: [] });
+    expect(out.variants[1]?.lineage.leverPatch).toEqual({ name: 'v2', set: releaseU2 });
+    expect(llm.complete).toHaveBeenCalledTimes(1);
+    expect(llm.complete.mock.calls[0]?.[0].messages[0]?.content).toContain('Return exactly 3 variants with ids v2, v3, v4.');
+  });
+
+  it('keeps the stage 4 delay variant and gives it a free lineage', async () => {
+    // SCENARIO: regression; the kolaudace phrase stays a free scenario
+    // INPUT: one reply with the recorded delay-3 patch as v1
+    // EXPECTED: v1 with the whole patch as its lever patch and scenario free
+    const b = await loadBaseline();
+    const { name: _name, ...good } = delay3Patch;
+    const llm = scriptedLlm([JSON.stringify({ variants: [{ id: 'v1', title: 't', rationale: 'r', levers: [], patch: good }], openQuestions: [] })]);
+    const out = (await createKaironActivities(fakeApi(baselineEvaluate))['kairon.proposeVariants'](
+      { scenario: 'kolaudace +3', baseline: b, count: 1 },
+      ctxWith(llm),
+    )) as { variants: Array<{ id: string; lineage: DraftLineage }> };
+    expect(out.variants.map((v) => v.id)).toEqual(['v1']);
+    expect(out.variants[0]?.lineage).toEqual({
+      activePlanHash: planHash(fixtureDoc),
+      scenario: { type: 'free' },
+      leverPatch: { ...good, name: 'v1' },
+      steps: [],
+    });
+  });
+});
+
+describe('kairon.buildGoalDrafts', () => {
+  const HASH = planHash(fixtureDoc);
+  const CONSTRUCTION = { type: 'cost_change' as const, lineCodes: ['D5', 'D8'], fromMonth: '2026-09', factorPpm: 1_080_000 };
+  const releaseU2 = ['2026-11', '2027-06', '2028-01', '2028-06'].map((month) => ({ code: 'U2', month, amountMinor: '0' }));
+  const r1 = (factorPpm: number) => ({ lineCodes: ['R1'], fromMonth: '2026-09', factorPpm });
+  const s2 = (id: string, leverPatch: DraftLineage['leverPatch']) => ({
+    id,
+    lineage: { activePlanHash: HASH, scenario: CONSTRUCTION, leverPatch, steps: [] } as DraftLineage,
+  });
+  const S2_PARENTS = [
+    s2('v1', null),
+    s2('v2', { name: 'v2', set: releaseU2 }),
+    s2('v3', { name: 'v3', scale: [r1(1_030_000)] }),
+    s2('v4', { name: 'v4', scale: [r1(1_023_000)], set: releaseU2 }),
+  ];
+
+  it('pins Cedar to the need of the parent without an LLM call', async () => {
+    // SCENARIO: «ближайшие 6 месяцев все затраты покрывает Cedar» on the stage 4 delay draft v2
+    // INPUT: parent v2 = the delay-3 patch (evaluate serves eval-delay-3.json); existing ids v1..v3
+    // EXPECTED: one child v2.1 with a cover step; its draws are Cedar = the delay-3 cash need 2026-09..2027-02
+    const b = await loadBaseline();
+    const { name: _name, ...good } = delay3Patch;
+    const delayBody = canonicalJson(readJson('bodies/body-delay-3.json'));
+    const delayEval = readJson('responses/eval-delay-3.json') as { walk: { cashNeedMinor: Record<string, string> } };
+    const api = fakeApi((v, body) => (canonicalJson(body) === delayBody ? { status: 200, json: delayEval } : stage5Evaluate(v, body)), { partners: true });
+    const llm = scriptedLlm([]);
+    const goal = { type: 'funding_cover' as const, partnerId: 'cedar', fromMonth: '2026-09', months: 6 };
+    const parent = { id: 'v2', lineage: { activePlanHash: HASH, scenario: { type: 'free' as const }, leverPatch: { ...good, name: 'v2' }, steps: [] } };
+    const out = (await createKaironActivities(api)['kairon.buildGoalDrafts'](
+      { baseline: { ...b, partners: [{ partnerId: 'solstice', name: 'Solstice Sponsor', sharePct: 0.3 }, { partnerId: 'cedar', name: 'Cedar Partners', sharePct: 0.7 }] }, goal, parents: [parent], existingIds: ['v1', 'v2', 'v3'] },
+      ctxWith(llm),
+    )) as { variants: Array<{ id: string; parentId: string; title: string; lineage: DraftLineage }>; answers: unknown[] };
+
+    const months = ['2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02'];
+    const draws = months.map((m) => ({
+      sourceId: '7c1962e8-a12d-42ca-82cc-4bea10338044',
+      date: `${m}-01`,
+      amountMinor: delayEval.walk.cashNeedMinor[m] ?? '0',
+      origin: 'manual',
+    }));
+    expect(llm.complete).toHaveBeenCalledTimes(0);
+    expect(out.answers).toEqual([]);
+    expect(out.variants.map((v) => [v.id, v.parentId, v.title])).toEqual([
+      ['v2.1', 'v2', 'Cedar Partners покрывает всю потребность 6 мес. с 2026-09'],
+    ]);
+    expect(out.variants[0]?.lineage).toEqual({ ...parent.lineage, steps: [{ type: 'cover', goal, draws }] });
+  });
+
+  it('answers instead of drafting when every parent already meets the IRR floor', async () => {
+    // SCENARIO: «Хочу сохранить IRR только для Solstice» on S2 v1..v4, all above Solstice's promise
+    // INPUT: irr_floor ['solstice'], the four S2 lineages; evaluate serves the recorded S2 bodies
+    // EXPECTED: 4 answers «Цель уже выполнена в vN», no variants, no LLM call
+    const b = await loadBaseline();
+    const llm = scriptedLlm([]);
+    const out = (await createKaironActivities(fakeApi(stage5Evaluate))['kairon.buildGoalDrafts'](
+      { baseline: b, goal: { type: 'irr_floor', partnerIds: ['solstice'] }, parents: S2_PARENTS, existingIds: ['v1', 'v2', 'v3', 'v4'] },
+      ctxWith(llm),
+    )) as { variants: unknown[]; answers: Array<{ parentId: string; text: string }> };
+    expect(llm.complete).toHaveBeenCalledTimes(0);
+    expect(out.variants).toEqual([]);
+    expect(out.answers).toEqual(['v1', 'v2', 'v3', 'v4'].map((id) => ({ parentId: id, text: `Цель уже выполнена в ${id}` })));
+  });
+
+  it('asks for one lever draft on top of the parent for a profit target', async () => {
+    // SCENARIO: «Хочу добиться чистой прибыли в +10 000 000» on S2 v1
+    // INPUT: net_profit_target delta 1 000 000 000; the scripted LLM returns R1 × 1.03 as v1.1
+    // EXPECTED: one child v1.1 whose lineage adds a levers step; one LLM call asking for 1 variant with id v1.1
+    const b = await loadBaseline();
+    const empty = { stretch: [], shift: [], extend: [], scale: [], set: [], monthRangeTo: null, shareTarget: null };
+    const llm = scriptedLlm([
+      JSON.stringify({ variants: [{ id: 'v1.1', title: 'Цены +3 %', rationale: 'r', levers: ['цены'], patch: { ...empty, scale: [r1(1_030_000)] } }], openQuestions: [] }),
+    ]);
+    const goal = { type: 'net_profit_target' as const, amountMinor: '1000000000', basis: 'delta' as const };
+    const out = (await createKaironActivities(fakeApi(stage5Evaluate))['kairon.buildGoalDrafts'](
+      { baseline: b, goal, parents: [S2_PARENTS[0]], existingIds: ['v1', 'v2', 'v3', 'v4'] },
+      ctxWith(llm),
+    )) as { variants: Array<{ id: string; parentId: string; lineage: DraftLineage }> };
+    expect(out.variants.map((v) => [v.id, v.parentId])).toEqual([['v1.1', 'v1']]);
+    expect(out.variants[0]?.lineage.steps).toEqual([{ type: 'levers', goal, patch: { name: 'v1.1', scale: [r1(1_030_000)] } }]);
+    expect(llm.complete.mock.calls[0]?.[0].messages[0]?.content).toContain('Return exactly 1 variants with ids v1.1.');
   });
 });
 

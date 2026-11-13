@@ -48,6 +48,14 @@ export const kaironForecastTools: Tool[] = [
     type: 'latent',
   },
   {
+    name: 'kairon.buildGoalDrafts',
+    inputSchema: kaironToolInputSchemas['kairon.buildGoalDrafts'] as Tool['inputSchema'],
+    description:
+      'Child drafts for a goal: a cover goal becomes manual draws equal to the parent need (no LLM); an IRR floor or a profit target asks the LLM for one lever draft per parent that misses it.',
+    category: 'transformation',
+    type: 'latent',
+  },
+  {
     name: 'kairon.scoreVariants',
     inputSchema: kaironToolInputSchemas['kairon.scoreVariants'] as Tool['inputSchema'],
     description:

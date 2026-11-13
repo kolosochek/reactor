@@ -38,7 +38,7 @@ function runningCostRule(b: Baseline): string {
   ].join('');
 }
 
-export function proposeSystemPrompt(b: Baseline, count: number): string {
+export function proposeSystemPrompt(b: Baseline, count: number, levers?: LeverMode): string {
   const derived = b.derivedLineCodes.length > 0 ? b.derivedLineCodes.join(', ') : 'none on this project';
   return `You are a financial analyst for a Czech residential developer. You change a project's monthly forecast by writing small PATCHES. A server applies each patch and computes every figure (partner IRR, interest, tax, LTV). You never compute or state figures yourself.
 
@@ -59,16 +59,50 @@ HARD RULES (the server refuses a patch that breaks them):
 - Never extend a revenue line: extend repeats the last sale and invents income. Move revenue with shift.
 - Costs move later. Do not cut a cost unless the user asks for it.
 
-HOW TO BUILD VARIANTS:
+${levers === undefined ? freeRules(count) : leverRules(levers)}`;
+}
+
+/** Stage 5 (DEV-1375): the server applied the stated change (or the parent draft) and asks for levers only. */
+export interface LeverMode {
+  ids: string[];
+  /** What the server already applied, in words. */
+  applied: string;
+  /** The goal in words; null means the promise. */
+  goal: string | null;
+}
+
+const PROMISE_GOAL =
+  "every partner's IRR at or above the approved budget (the promise made to investors) and as close to it as possible. Below the promise is the problem. Far above it is no better: the lever then asks buyers or partners for more than the scenario costs.";
+
+const LEVER_EXAMPLES =
+  'a price change on revenue lines (scale), phasing handovers (shift with toMonth), moving non-construction costs, releasing the reserve (set U lines to 0), a different equity share';
+
+function outputRules(ids: string[]): string {
+  return `OUTPUT: only one JSON object, no prose around it:
+{"variants":[{"id":"${ids[0] ?? 'v1'}","title":"...","rationale":"...","levers":["..."],"patch":{...}}],"openQuestions":["..."]}
+Return exactly ${ids.length} variants with ids ${ids.join(', ')}. Write title, rationale, levers and openQuestions in Russian. The rationale is 2-3 sentences in a developer's terms. Put every assumption you are unsure about into openQuestions. Never write an IRR, profit or LTV figure.`;
+}
+
+function freeRules(count: number): string {
+  const ids = Array.from({ length: count }, (_, i) => `v${i + 1}`);
+  return `HOW TO BUILD VARIANTS:
 - First translate the user's scenario into the mechanical change (the delay itself): what stretches, what shifts, what runs longer, the new monthRangeTo.
 - v1 is the scenario alone: only the mechanical change, levers [] and shareTarget null. It shows what the scenario costs before any lever.
-- Every later variant starts from v1's patch and adds 1 or 2 levers to win back the partners' IRR, for example a price change on revenue lines (scale), phasing handovers (shift with toMonth), moving non-construction costs, a different equity share.
-- The goal: every partner's IRR at or above the approved budget (the promise made to investors) and as close to it as possible. Below the promise is the problem. Far above it is no better: the lever then asks buyers or partners for more than the scenario costs.
+- Every later variant starts from v1's patch and adds 1 or 2 levers to win back the partners' IRR, for example ${LEVER_EXAMPLES}.
+- The goal: ${PROMISE_GOAL}
 - Variants must differ in their levers.
 
-OUTPUT: only one JSON object, no prose around it:
-{"variants":[{"id":"v1","title":"...","rationale":"...","levers":["..."],"patch":{...}}],"openQuestions":["..."]}
-Return exactly ${count} variants with ids v1..v${count}. Write title, rationale, levers and openQuestions in Russian. The rationale is 2-3 sentences in a developer's terms. Put every assumption you are unsure about into openQuestions. Never write an IRR, profit or LTV figure.`;
+${outputRules(ids)}`;
+}
+
+function leverRules(levers: LeverMode): string {
+  return `HOW TO BUILD VARIANTS:
+- The server has already applied ${levers.applied}. The baseline lines below include it. Do not repeat it and do not undo it.
+- Each variant adds only 1 or 2 levers on top of it, for example ${LEVER_EXAMPLES}.
+- The goal: ${levers.goal ?? PROMISE_GOAL}
+- Variants must differ in their levers.
+
+${outputRules(levers.ids)}`;
 }
 
 export interface ChatTurn {

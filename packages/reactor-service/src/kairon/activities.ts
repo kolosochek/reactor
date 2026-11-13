@@ -13,7 +13,7 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { Activity, ActivityContext, LLMCompletionRequest } from '@kolosochek/reactor-core';
-import { loadDocument, readBaseline, type Baseline } from './baseline.js';
+import { digestLines, loadDocument, readBaseline, type Baseline } from './baseline.js';
 import { checkPatch, type PatchRules } from './checks.js';
 import type { KaironApi } from './client.js';
 import { route, RouteInput, StructureGoalInput, structureGoal, StructureScenarioInput, structureScenario } from './conversation.js';
@@ -27,12 +27,16 @@ import {
   proposalJsonSchema,
 } from './llmSchemas.js';
 import type { KaironLLMRequest } from './openrouter.js';
+import { checkGoals, fundingCoverDraws, goalLabel, GoalSchema, type Goal } from './goals.js';
+import { childId, DraftLineageSchema, planHash, replayLineage, type DraftLineage } from './lineage.js';
 import { ForecastPatchSchema, type ForecastDocument } from './patch.js';
+import { applyScenario, ScenarioSpecSchema, type ScenarioSpec } from './scenario.js';
 import {
   explainSystemPrompt,
   explainUserPrompt,
   proposeSystemPrompt,
   proposeUserPrompt,
+  type LeverMode,
 } from './prompts.js';
 import {
   buildFacts,
@@ -89,7 +93,11 @@ interface Judgement {
   openQuestions: string[];
 }
 
-function judgeProposal(content: string, doc: ForecastDocument, rules: PatchRules): Judgement {
+/**
+ * expectedIds: the ids the server asked for (lever mode); null in free mode,
+ * where v1 must be the scenario alone.
+ */
+function judgeProposal(content: string, doc: ForecastDocument, rules: PatchRules, expectedIds: string[] | null): Judgement {
   let raw: unknown;
   try {
     raw = parseJsonObject(content);
@@ -104,9 +112,12 @@ function judgeProposal(content: string, doc: ForecastDocument, rules: PatchRules
   }
   const judgement: Judgement = { errors: [], accepted: [], rejected: [], openQuestions: parsed.data.openQuestions };
   for (const variant of parsed.data.variants) {
-    const leversInV1 = variant.id === 'v1' && (variant.levers.length > 0 || variant.patch.shareTarget !== undefined);
+    const leversInV1 =
+      expectedIds === null && variant.id === 'v1' && (variant.levers.length > 0 || variant.patch.shareTarget !== undefined);
+    const unexpected = expectedIds !== null && !expectedIds.includes(variant.id);
     const errors = [
       ...(leversInV1 ? [V1_LEVERS_ERROR] : []),
+      ...(unexpected ? [`id ${variant.id} was not asked for; use ${expectedIds.join(', ')}`] : []),
       ...checkPatch(doc, rules, { ...variant.patch, name: variant.id }).errors,
     ];
     if (errors.length === 0) {
@@ -119,17 +130,40 @@ function judgeProposal(content: string, doc: ForecastDocument, rules: PatchRules
   return judgement;
 }
 
+const HistoryArg = z.array(z.object({ user: z.string(), summary: z.string() })).default([]);
+
 const ProposeInput = z.object({
   scenario: z.string().min(1),
   baseline: BaselineArg,
-  history: z.array(z.object({ user: z.string(), summary: z.string() })).default([]),
+  history: HistoryArg,
   count: z.number().int().min(1).max(4).default(3),
+  scenarioSpec: ScenarioSpecSchema.default({ type: 'free' }),
+  section: z.string().default('S1'),
 });
 
-async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContext) {
-  const input = ProposeInput.parse(raw);
-  const b = input.baseline;
-  const doc = await loadDocument(api, b.forecastVersion.id);
+interface LeverAsk {
+  b: Baseline;
+  doc: ForecastDocument;
+  scenario: string;
+  history: Array<{ user: string; summary: string }>;
+  /** Free mode (stage 4) builds `count` variants with v1 = the scenario alone; lever mode builds `levers.ids`. */
+  count: number;
+  levers?: LeverMode;
+}
+
+interface LeverAnswer {
+  accepted: Variant[];
+  rejected: Judgement['rejected'];
+  openQuestions: string[];
+  attempts: Array<{ attempt: number; errors: string[] }>;
+  model: string;
+}
+
+/** The propose loop: strict schema, server checks on `doc`, up to 3 attempts with the errors fed back. */
+async function askVariants(ctx: ActivityContext, ask: LeverAsk): Promise<LeverAnswer> {
+  const { b, doc } = ask;
+  const view: Baseline = { ...b, lines: digestLines(doc.plan, b.closedThrough) };
+  const count = ask.levers?.ids.length ?? ask.count;
   const codes = b.lines.map((l) => l.code);
   const months = openMonths(b.closedThrough, b.monthRange.to, 24);
   const responseSchema = {
@@ -138,10 +172,10 @@ async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContex
     relaxedSchema: proposalJsonSchema(codes, months, { relaxed: true }),
   };
   const messages: LLMMessage[] = [
-    { role: 'system', content: proposeSystemPrompt(b, input.count) },
-    { role: 'user', content: proposeUserPrompt(input.scenario, b, input.history) },
+    { role: 'system', content: proposeSystemPrompt(b, count, ask.levers) },
+    { role: 'user', content: proposeUserPrompt(ask.scenario, view, ask.history) },
   ];
-  const attempts: Array<{ attempt: number; errors: string[] }> = [];
+  const attempts: LeverAnswer['attempts'] = [];
   let last: Judgement = { errors: [], accepted: [], rejected: [], openQuestions: [] };
   let model = '';
   for (let attempt = 1; attempt <= MAX_PROPOSE_ATTEMPTS; attempt++) {
@@ -159,7 +193,7 @@ async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContex
     const cutOff = resp.finishReason === 'length';
     last = cutOff
       ? { errors: [CUT_OFF_ERROR], accepted: [], rejected: [], openQuestions: [] }
-      : judgeProposal(resp.content, doc, rulesOf(b));
+      : judgeProposal(resp.content, doc, rulesOf(b), ask.levers?.ids ?? null);
     attempts.push({ attempt, errors: last.errors });
     ctx.onProgress?.({ type: 'kairon.propose.attempt', payload: { attempt, errors: last.errors } });
     if (last.errors.length === 0) break;
@@ -168,12 +202,191 @@ async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContex
       {
         role: 'user',
         content: cutOff
-          ? `Your answer was cut off at the token limit before the JSON closed. Return the whole JSON again with all ${input.count} variants; keep each rationale to 2 sentences.`
-          : `The server would refuse parts of this answer. Fix every error below and return the whole JSON again with all ${input.count} variants:\n${last.errors.map((e) => `- ${e}`).join('\n')}`,
+          ? `Your answer was cut off at the token limit before the JSON closed. Return the whole JSON again with all ${count} variants; keep each rationale to 2 sentences.`
+          : `The server would refuse parts of this answer. Fix every error below and return the whole JSON again with all ${count} variants:\n${last.errors.map((e) => `- ${e}`).join('\n')}`,
       },
     );
   }
-  return { variants: last.accepted, rejected: last.rejected, openQuestions: last.openQuestions, attempts, model };
+  return { accepted: last.accepted, rejected: last.rejected, openQuestions: last.openQuestions, attempts, model };
+}
+
+/** A proposed draft: what the page keeps in its section and sends back for scoring, goals and the save. */
+export interface DraftVariant {
+  id: string;
+  parentId: string | null;
+  title: string;
+  rationale: string;
+  levers: string[];
+  /** The lever patch of this step ({} for a server-built draft); kept for the stage 4 scoring. */
+  patch: Variant['patch'];
+  lineage: DraftLineage;
+}
+
+function appliedText(spec: ScenarioSpec): string {
+  if (spec.type === 'free') return 'nothing';
+  const percent = (spec.factorPpm - 1_000_000) / 10_000;
+  return `the user's stated change: lines ${spec.lineCodes.join(', ')} ${percent >= 0 ? '+' : ''}${percent} % from ${spec.fromMonth}`;
+}
+
+async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContext) {
+  const input = ProposeInput.parse(raw);
+  const b = input.baseline;
+  const doc = await loadDocument(api, b.forecastVersion.id);
+  const activePlanHash = planHash(doc);
+  const spec = input.scenarioSpec;
+  const lineageOf = (leverPatch: DraftLineage['leverPatch']): DraftLineage => ({ activePlanHash, scenario: spec, leverPatch, steps: [] });
+  const draft = (v: Variant): DraftVariant => ({
+    id: v.id,
+    parentId: null,
+    title: v.title,
+    rationale: v.rationale,
+    levers: v.levers,
+    patch: v.patch,
+    lineage: lineageOf({ ...v.patch, name: v.id }),
+  });
+  if (spec.type === 'free') {
+    const out = await askVariants(ctx, { b, doc, scenario: input.scenario, history: input.history, count: input.count });
+    return { section: input.section, variants: out.accepted.map(draft), rejected: out.rejected, openQuestions: out.openQuestions, attempts: out.attempts, model: out.model };
+  }
+  const scenario = applyScenario(doc, rulesOf(b), spec);
+  if (scenario.errors.length > 0) {
+    return { section: input.section, variants: [], rejected: [{ id: 'v1', title: input.scenario, errors: scenario.errors }], openQuestions: [], attempts: [], model: '' };
+  }
+  const v1: DraftVariant = {
+    id: 'v1',
+    parentId: null,
+    title: input.scenario,
+    rationale: 'Только заявленное изменение, без рычагов: показывает цену сценария.',
+    levers: [],
+    patch: {},
+    lineage: lineageOf(null),
+  };
+  const ids = Array.from({ length: input.count - 1 }, (_, i) => `v${i + 2}`);
+  if (ids.length === 0) {
+    return { section: input.section, variants: [v1], rejected: [], openQuestions: [], attempts: [], model: '' };
+  }
+  const out = await askVariants(ctx, {
+    b,
+    doc: scenario.doc,
+    scenario: input.scenario,
+    history: input.history,
+    count: ids.length,
+    levers: { ids, applied: appliedText(spec), goal: null },
+  });
+  return {
+    section: input.section,
+    variants: [v1, ...out.accepted.map(draft)],
+    rejected: out.rejected,
+    openQuestions: out.openQuestions,
+    attempts: out.attempts,
+    model: out.model,
+  };
+}
+
+const GoalDraftsInput = z.object({
+  baseline: BaselineArg,
+  goal: GoalSchema,
+  parents: z.array(z.object({ id: z.string().min(1), lineage: DraftLineageSchema })).min(1),
+  existingIds: z.array(z.string()).default([]),
+  message: z.string().default(''),
+  history: HistoryArg,
+});
+
+function goalText(goal: Goal, b: Baseline, parentNetProfitMinor: string): string {
+  const name = (id: string) => partnersOf(b).find((p) => p.partnerId === id)?.name ?? id;
+  if (goal.type === 'irr_floor') {
+    return `the IRR of ${goal.partnerIds.map(name).join(', ')} at or above the approved budget (the promise) and as close to it as possible; the other partners do not matter.`;
+  }
+  if (goal.type === 'net_profit_target') {
+    return `${goalLabel(goal, name, currencyOf(b), parentNetProfitMinor)}: net profit at or above this target and as close to it as possible.`;
+  }
+  return goalLabel(goal, name, currencyOf(b), parentNetProfitMinor);
+}
+
+function partnersOf(b: Baseline): Array<{ partnerId: string; name: string }> {
+  return b.partners.length > 0 ? b.partners : b.approved.partners;
+}
+
+async function buildGoalDrafts(api: KaironApi, raw: unknown, ctx: ActivityContext) {
+  const input = GoalDraftsInput.parse(raw);
+  const { baseline: b, goal } = input;
+  const doc = await loadDocument(api, b.forecastVersion.id);
+  const rules = rulesOf(b);
+  const name = (id: string) => partnersOf(b).find((p) => p.partnerId === id)?.name ?? id;
+  const variants: DraftVariant[] = [];
+  const answers: Array<{ parentId: string; text: string }> = [];
+  const rejected: Judgement['rejected'] = [];
+  const attempts: LeverAnswer['attempts'] = [];
+  const taken = [...input.existingIds];
+  let model = '';
+  for (const parent of input.parents) {
+    const replay = replayLineage(doc, rules, parent.lineage);
+    if (replay.body === null) {
+      rejected.push({ id: parent.id, title: parent.id, errors: replay.errors });
+      continue;
+    }
+    const res = await api.evaluate(b.forecastVersion.id, replay.body);
+    if (res.status !== 200) {
+      rejected.push({ id: parent.id, title: parent.id, errors: [refusalMessage(res.json)] });
+      continue;
+    }
+    const parentNet = summarizeEvaluation(res.json).netProfitMinor;
+    const id = childId(parent.id, taken);
+    if (goal.type === 'funding_cover') {
+      const title = goalLabel(goal, name, currencyOf(b), parentNet);
+      const cover = fundingCoverDraws(goal, res.json, { closedThrough: b.closedThrough, planEnd: b.monthRange.to });
+      if (cover.errors.length > 0) {
+        rejected.push({ id, title, errors: cover.errors });
+        continue;
+      }
+      taken.push(id);
+      variants.push({
+        id,
+        parentId: parent.id,
+        title,
+        rationale: '',
+        levers: [],
+        patch: {},
+        lineage: { ...parent.lineage, steps: [...parent.lineage.steps, { type: 'cover', goal, draws: cover.draws }] },
+      });
+      continue;
+    }
+    const [met] = checkGoals([goal], {
+      approved: b.approved,
+      parentEval: res.json,
+      draftEval: res.json,
+      parentNetProfitMinor: parentNet,
+      currency: currencyOf(b),
+    });
+    if (met?.draft === 'ok') {
+      answers.push({ parentId: parent.id, text: `Цель уже выполнена в ${parent.id}` });
+      continue;
+    }
+    const out = await askVariants(ctx, {
+      b,
+      doc: { ...doc, plan: replay.body.plan },
+      scenario: input.message === '' ? goalLabel(goal, name, currencyOf(b), parentNet) : input.message,
+      history: input.history,
+      count: 1,
+      levers: { ids: [id], applied: `the draft ${parent.id} (its scenario, levers and goals)`, goal: goalText(goal, b, parentNet) },
+    });
+    model = out.model;
+    attempts.push(...out.attempts);
+    rejected.push(...out.rejected);
+    for (const v of out.accepted) {
+      taken.push(v.id);
+      variants.push({
+        id: v.id,
+        parentId: parent.id,
+        title: v.title,
+        rationale: v.rationale,
+        levers: v.levers,
+        patch: v.patch,
+        lineage: { ...parent.lineage, steps: [...parent.lineage.steps, { type: 'levers', goal, patch: { ...v.patch, name: v.id } }] },
+      });
+    }
+  }
+  return { variants, answers, rejected, attempts, model };
 }
 
 const ScoreInput = z.object({
@@ -424,6 +637,7 @@ export type KaironToolName =
   | 'kairon.structureScenario'
   | 'kairon.structureGoal'
   | 'kairon.proposeVariants'
+  | 'kairon.buildGoalDrafts'
   | 'kairon.scoreVariants'
   | 'kairon.explainVariants';
 
@@ -434,6 +648,7 @@ export const kaironToolInputSchemas: Record<KaironToolName, Record<string, unkno
   'kairon.structureScenario': zodToJsonSchema(StructureScenarioInput) as Record<string, unknown>,
   'kairon.structureGoal': zodToJsonSchema(StructureGoalInput) as Record<string, unknown>,
   'kairon.proposeVariants': zodToJsonSchema(ProposeInput) as Record<string, unknown>,
+  'kairon.buildGoalDrafts': zodToJsonSchema(GoalDraftsInput) as Record<string, unknown>,
   'kairon.scoreVariants': zodToJsonSchema(ScoreInput) as Record<string, unknown>,
   'kairon.explainVariants': zodToJsonSchema(ExplainInput) as Record<string, unknown>,
 };
@@ -452,6 +667,9 @@ export function createKaironActivities(api: KaironApi): Record<KaironToolName, A
     'kairon.structureGoal': traced('kairon.structureGoal', 'latent', async (input, ctx) => structureGoal(input, ctx)),
     'kairon.proposeVariants': traced('kairon.proposeVariants', 'latent', async (input, ctx) =>
       proposeVariants(traceKaironApi(api, ctx.onProgress), input, ctx),
+    ),
+    'kairon.buildGoalDrafts': traced('kairon.buildGoalDrafts', 'latent', async (input, ctx) =>
+      buildGoalDrafts(traceKaironApi(api, ctx.onProgress), input, ctx),
     ),
     'kairon.scoreVariants': traced('kairon.scoreVariants', 'explicit', async (input, ctx) =>
       scoreVariants(traceKaironApi(api, ctx.onProgress), input),

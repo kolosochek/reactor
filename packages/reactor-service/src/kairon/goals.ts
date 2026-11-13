@@ -120,6 +120,21 @@ function coveredIn(funding: Funding, partnerId: string, month: string): boolean 
 
 const mark = (ok: boolean): Mark => (ok ? 'ok' : 'breach');
 
+/** The goal in Russian words: the goal check's label and a cover draft's title. */
+export function goalLabel(
+  goal: Goal,
+  nameOf: (partnerId: string) => string,
+  currency: CurrencyFormat,
+  parentNetProfitMinor: string,
+): string {
+  if (goal.type === 'funding_cover') {
+    return `${nameOf(goal.partnerId)} покрывает всю потребность ${goal.months} мес. с ${goal.fromMonth}`;
+  }
+  if (goal.type === 'irr_floor') return `IRR не ниже обещания: ${goal.partnerIds.map(nameOf).join(', ')}`;
+  const target = profitTargetMinor(goal, parentNetProfitMinor);
+  return `Чистая прибыль не ниже ${formatMillions(String(target), currency.decimals, currency.currencyCode)}`;
+}
+
 function irrAtLeastPromise(metrics: EvaluationMetrics, approved: EvaluationMetrics, partnerIds: string[]): boolean {
   return partnerIds.every((id) => {
     const irr = metrics.partners.find((p) => p.partnerId === id)?.irr ?? null;
@@ -147,6 +162,7 @@ export function checkGoals(
   const parent = summarizeEvaluation(input.parentEval);
   const draft = summarizeEvaluation(input.draftEval);
   const nameOf = (id: string) => input.approved.partners.find((p) => p.partnerId === id)?.name ?? id;
+  const coverName = (id: string) => draftFunding.sourceGroups.find((g) => g.partnerId === id)?.partnerName ?? nameOf(id);
   return goals.map((goal): GoalCheck => {
     if (goal.type === 'funding_cover') {
       const months = windowMonths(goal.fromMonth, goal.months).map((month) => ({
@@ -154,12 +170,10 @@ export function checkGoals(
         parent: coveredIn(parentFunding, goal.partnerId, month),
         draft: coveredIn(draftFunding, goal.partnerId, month),
       }));
-      const partnerName =
-        draftFunding.sourceGroups.find((g) => g.partnerId === goal.partnerId)?.partnerName ?? goal.partnerId;
       return {
         goal,
         part: 'funding.draws',
-        label: `${partnerName} покрывает всю потребность ${goal.months} мес. с ${goal.fromMonth}`,
+        label: goalLabel(goal, coverName, input.currency, input.parentNetProfitMinor),
         parent: mark(months.every((m) => m.parent)),
         draft: mark(months.every((m) => m.draft)),
         months,
@@ -169,7 +183,7 @@ export function checkGoals(
       return {
         goal,
         part: 'exit.partners',
-        label: `IRR не ниже обещания: ${goal.partnerIds.map(nameOf).join(', ')}`,
+        label: goalLabel(goal, nameOf, input.currency, input.parentNetProfitMinor),
         parent: mark(irrAtLeastPromise(parent, input.approved, goal.partnerIds)),
         draft: mark(irrAtLeastPromise(draft, input.approved, goal.partnerIds)),
         months: [],
@@ -179,7 +193,7 @@ export function checkGoals(
     return {
       goal,
       part: 'netProfit',
-      label: `Чистая прибыль не ниже ${formatMillions(String(target), input.currency.decimals, input.currency.currencyCode)}`,
+      label: goalLabel(goal, nameOf, input.currency, input.parentNetProfitMinor),
       parent: mark(BigInt(parent.netProfitMinor) >= target),
       draft: mark(BigInt(draft.netProfitMinor) >= target),
       months: [],
