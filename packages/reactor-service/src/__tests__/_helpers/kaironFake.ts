@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HttpResult, KaironApi, KaironVersion } from '../../kairon/client.js';
+import { canonicalJson } from '../../kairon/lineage.js';
 import type { ForecastDocument, ForecastPlan } from '../../kairon/patch.js';
 
 export const KAIRON_FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'kairon');
@@ -71,28 +72,19 @@ export const baselineEvaluate = (versionId: string, body: unknown): HttpResult =
     : { status: 200, json: readFixture('responses/eval-approved.json') };
 };
 
-/** JSON with object keys sorted: the live API and the stage 4 fixture document order keys differently. */
-function canonical(value: unknown): string {
-  return JSON.stringify(value, (_key, v: unknown) =>
-    v !== null && typeof v === 'object' && !Array.isArray(v)
-      ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
-      : v,
-  );
-}
-
 const STAGE5_BODIES = ['s2-v1', 's2-v2', 's2-v3', 's2-v4', 's2-bank60', 'cover-cedar'];
 let stage5Bodies: Map<string, string> | null = null;
 
 function recordedStage5Bodies(): Map<string, string> {
   if (stage5Bodies === null) {
-    stage5Bodies = new Map(STAGE5_BODIES.map((name) => [canonical(readStage5(`${name}.body.json`)), `${name}.eval.json`]));
+    stage5Bodies = new Map(STAGE5_BODIES.map((name) => [canonicalJson(readStage5(`${name}.body.json`)), `${name}.eval.json`]));
   }
   return stage5Bodies;
 }
 
 /** The recorded stage 5 evaluate for this body; `{}` gives the active or the approved baseline. */
 export const stage5Evaluate = (versionId: string, body: unknown): HttpResult => {
-  const key = canonical(body);
+  const key = canonicalJson(body);
   if (key === '{}') {
     return { status: 200, json: readStage5(versionId === 'solstice-forecast-3' ? 'eval-active.json' : 'eval-approved.json') };
   }
