@@ -201,12 +201,12 @@ export function checkGoals(
   });
 }
 
+/** The newest profit target or IRR floor decides the ranking; a cover goal is a pass/fail check only. */
 export function rankGoalOf(goals: Goal[], parentNetProfitMinor: string): RankGoal {
-  const profit = goals.filter((g) => g.type === 'net_profit_target').at(-1);
-  if (profit !== undefined && profit.type === 'net_profit_target') {
-    return { type: 'net_profit_target', targetMinor: String(profitTargetMinor(profit, parentNetProfitMinor)) };
+  const last = goals.filter((g) => g.type !== 'funding_cover').at(-1);
+  if (last !== undefined && last.type === 'net_profit_target') {
+    return { type: 'net_profit_target', targetMinor: String(profitTargetMinor(last, parentNetProfitMinor)) };
   }
-  const floor = goals.filter((g) => g.type === 'irr_floor').at(-1);
-  if (floor !== undefined && floor.type === 'irr_floor') return { type: 'promise', partnerIds: floor.partnerIds };
+  if (last !== undefined && last.type === 'irr_floor') return { type: 'promise', partnerIds: last.partnerIds };
   return { type: 'promise', partnerIds: null };
 }

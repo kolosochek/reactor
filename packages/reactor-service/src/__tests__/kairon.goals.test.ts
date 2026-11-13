@@ -109,6 +109,16 @@ describe('kairon rankGoalOf', () => {
     expect(rankGoalOf([], '0')).toEqual({ type: 'promise', partnerIds: null });
   });
 
+  it('lets a later IRR floor win over an earlier profit target', () => {
+    // SCENARIO: demo step 6 after step 5: «+10 млн» on v1, then «IRR только для Solstice» on all (DEV-1376)
+    // INPUT: [net_profit_target delta 10 млн, irr_floor solstice]
+    // EXPECTED: the promise for Solstice only; the newest goal of the conversation decides the ranking
+    expect(rankGoalOf([npt('1000000000', 'delta'), { type: 'irr_floor', partnerIds: ['solstice'] }], '33340000000')).toEqual({
+      type: 'promise',
+      partnerIds: ['solstice'],
+    });
+  });
+
   it('lets the last profit target win over an IRR floor', () => {
     // SCENARIO: the user set an IRR floor, then an absolute profit target
     // INPUT: [irr_floor solstice, net_profit_target absolute 390 млн]

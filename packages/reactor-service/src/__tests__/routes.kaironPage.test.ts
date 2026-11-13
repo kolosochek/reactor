@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildServer } from '../server.js';
+import { DEMO_PHRASES } from '../kairon/sampleLlm.js';
 import type { RepositoriesProvider } from '@kolosochek/reactor-core';
 
 const stubRepos: RepositoriesProvider = {
@@ -21,6 +22,19 @@ describe('GET /kairon', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('text/html; charset=utf-8');
     expect(res.body).toContain('<title>Kairon forecast agent</title>');
+
+    await app.close();
+  });
+
+  it('serves the demo phrases the sample model answers', async () => {
+    // SCENARIO: the page offers the demo phrases as chips and checks a typed phrase before a sample run (Task 16 ruling)
+    // INPUT: GET /kairon/demo-phrases
+    // EXPECTED: status 200, { phrases: DEMO_PHRASES }
+    const app = await buildServer({ repositories: stubRepos, logLevel: 'warn' });
+
+    const res = await app.inject({ method: 'GET', url: '/kairon/demo-phrases' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ phrases: [...DEMO_PHRASES] });
 
     await app.close();
   });
