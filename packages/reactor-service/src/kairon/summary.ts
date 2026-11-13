@@ -126,6 +126,11 @@ export function rankVariants(
 const RU = (digits: number) =>
   new Intl.NumberFormat('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
+/** 0.2071 -> "20,71 %". */
+export function formatPercent(fraction: number): string {
+  return `${RU(2).format(fraction * 100)} %`;
+}
+
 export function signed(value: number, digits: number): string {
   return `${value < 0 ? '-' : '+'}${RU(digits).format(Math.abs(value))}`;
 }
