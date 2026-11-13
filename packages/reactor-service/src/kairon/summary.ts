@@ -212,8 +212,13 @@ function digitRuns(text: string): string[] {
   const found: string[] = [];
   let i = 0;
   while (i < text.length) {
-    if (!isDigit(text[i]) || isLetter(text[i - 1])) {
+    if (!isDigit(text[i])) {
       i++;
+      continue;
+    }
+    if (isLetter(text[i - 1])) {
+      // A name: "v2", and a stage 5 child draft "v2.1" with every dotted part.
+      while (isDigit(text[i]) || (text[i] === '.' && isDigit(text[i + 1]))) i++;
       continue;
     }
     let j = i;

@@ -124,6 +124,13 @@ describe('kairon facts and placeholders', () => {
     expect(literalNumbers('Сдвиг на 6 мес. даёт {{v1.irr.solstice}} против 19,5 в v2', [])).toEqual(['6', '19,5']);
   });
 
+  it('reads a child draft id as a name', () => {
+    // SCENARIO: stage 5 child drafts are named v2.1, v2.2 (DEV-1375); their digits are not figures
+    // INPUT: "v2.1 выше v2.12, запас 7"
+    // EXPECTED: ["7"]
+    expect(literalNumbers('v2.1 выше v2.12, запас 7', [])).toEqual(['7']);
+  });
+
   it('does not report numbers repeated from the scenario or the facts', () => {
     // SCENARIO: the LLM restates the scenario's delay and dates and an exit month from the facts
     // INPUT: template "на 3 месяца, с 2027-12 на 2028-03, выход 2028-10, запас 7"; sources: the scenario, "2028-10"
