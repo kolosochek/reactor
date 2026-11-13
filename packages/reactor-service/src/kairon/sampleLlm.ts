@@ -107,9 +107,15 @@ function priceLever(id: string): object {
   };
 }
 
-/** The demo phrase of the current message: the one found last in the first user message. */
+/**
+ * The demo phrase of the current message: the one found last in the first user message.
+ * The router and the answer prompts list draft titles after the message; a title can repeat a demo phrase,
+ * so the text from the DRAFTS block on is not searched.
+ */
 function phraseOf(request: KaironLLMRequest): Phrase {
-  const user = request.messages.find((m) => m.role === 'user')?.content ?? '';
+  const content = request.messages.find((m) => m.role === 'user')?.content ?? '';
+  const draftsAt = content.indexOf('\n\nDRAFTS:\n');
+  const user = draftsAt === -1 ? content : content.slice(0, draftsAt);
   let found: Phrase = 'unknown';
   let at = -1;
   DEMO_PHRASES.forEach((phrase, i) => {
@@ -177,7 +183,7 @@ function answer(phrase: Phrase): Record<string, unknown> {
   return {
     answer:
       phrase === 'why'
-        ? 'v2 выше v3 по правилам ранжирования сервера: IRR Solstice {{v2.irr.solstice}} против {{v3.irr.solstice}} при обещании {{approved.irr.solstice}}, чистая прибыль {{v2.d.netProfit}} против {{v3.d.netProfit}}.'
+        ? 'По IRR Solstice v2 выше v3: {{v2.irr.solstice}} против {{v3.irr.solstice}}, чистая прибыль {{v2.d.netProfit}} против {{v3.d.netProfit}}. В ранжировании сервера v3 стоит выше v2: правило берёт IRR не ниже обещания {{approved.irr.solstice}} и ближайший к нему, у v3 он ближе.'
         : NO_ANSWER,
   };
 }

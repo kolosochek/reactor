@@ -137,6 +137,47 @@ svg text { font-size: 11px; }
 .vchart text.ink { fill: var(--ink); }
 .vchart text.lbl { font-size: 12px; fill: var(--ink); }
 @media (max-width: 760px) { .story { grid-template-columns: 1fr; } .lead { font-size: 18px; } }
+
+/* ---------- stage 5 (DEV-1376): ribbon, sections, cards ---------- */
+:root { --border: var(--line); --bg-primary: var(--bg); --bg-secondary: var(--panel); --text-primary: var(--ink); --text-secondary: var(--muted); --text-tertiary: color-mix(in srgb, var(--muted) 65%, var(--bg)); }
+.k-card .k-widget, .k-card > div { overflow-x: auto; }
+.k-card-h { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 8px; }
+.k-card-h .muted { font-size: 12px; }
+.k-card table th, .k-card table td { white-space: normal; text-align: left; }
+.k-card table.k-matrix td, .k-card table.k-matrix th { white-space: nowrap; text-align: right; }
+.k-card table.k-matrix td:first-child, .k-card table.k-matrix th:first-child { text-align: left; }
+.badge-route { display: inline-block; font-size: 12px; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-bottom: 8px; }
+.ribbon { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.k-plan { --c: #6b4fa0; } .k-exec { --c: #2e7d4f; }
+.band { border-left: 3px solid var(--c); padding: 6px 10px; background: color-mix(in srgb, var(--c) 6%, transparent); border-radius: 0 8px 8px 0; }
+.band-h { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--c); font-weight: 600; margin-bottom: 2px; }
+.divider { display: flex; align-items: center; gap: 8px; color: var(--c); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: color-mix(in srgb, var(--c) 45%, transparent); }
+.k-row { border-bottom: 1px dashed var(--line); font-size: 13px; }
+.k-row:last-child { border-bottom: 0; }
+.k-row > summary { list-style: none; display: grid; grid-template-columns: 14px 18px 1fr auto auto; gap: 6px; padding: 4px 0; cursor: pointer; align-items: baseline; }
+.k-row > summary::-webkit-details-marker { display: none; }
+.k-row > summary::before { content: '▸'; color: var(--muted); }
+.k-row[open] > summary::before { content: '▾'; }
+.k-row .mk.ok { color: #0ca30c; } .k-row .mk.run { color: #b26a00; } .k-row .mk.bad { color: #d03b3b; }
+.k-row .t { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.k-row .who { font-size: 10px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.k-row .who.llm { color: #6b4fa0; border-color: #6b4fa0; } .k-row .who.srv { color: #2e7d4f; border-color: #2e7d4f; }
+.k-row .sub { grid-column: 3 / 6; color: var(--muted); font-size: 12px; }
+.k-io { margin: 2px 0 8px 38px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.k-io .k-status div { color: var(--muted); }
+.sec-h { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 4px 0 8px; }
+.sec-h b { font-size: 15px; }
+.k-chip { display: inline-flex; gap: 2px; align-items: center; font-size: 12px; padding: 0 2px 0 9px; border-radius: 999px; border: 1px solid #b26a00; color: #b26a00; }
+.k-chip button { border: 0; background: none; padding: 0 5px; color: inherit; cursor: pointer; }
+.dtabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.dtab { cursor: pointer; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 13px; background: var(--bg); }
+.dtab[aria-selected="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+.demo { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 8px; }
+.demo-chip { font-size: 12px; padding: 2px 9px; border-radius: 999px; cursor: pointer; }
+.answers { font-size: 13.5px; margin: 6px 0; }
+.switch-note { font-size: 12.5px; color: var(--accent); margin-top: 4px; }
+.save-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -150,6 +191,7 @@ svg text { font-size: 11px; }
     <label>Вариантов<select id="count"><option>2</option><option selected>3</option><option>4</option></select></label>
     <div class="modelinfo" id="modelInfo"></div>
     <label>Сохранённый прогон<input id="replay" type="file" accept=".ndjson,application/x-ndjson"></label>
+    <button id="saveSession" type="button">Сохранить сессию</button>
   </div>
 </header>
 <main id="chat">
@@ -161,10 +203,18 @@ svg text { font-size: 11px; }
       <li><span class="mono">kairon.scoreVariants</span>: каждый патч применяется детерминированно и считается сервером Kairon. Отказ сервера показывается как результат варианта.</li>
       <li><span class="mono">kairon.explainVariants</span>: LLM объясняет ранжирование. Цифры в тексте подставлены из ответов <code>evaluate</code>.</li>
     </ol>
+    <h3>Этап 5: разговор</h3>
+    <ol class="steps">
+      <li>Каждое сообщение идёт двумя прогонами. Планирование (LLM): <span class="mono">kairon.route</span> выбирает вид сообщения и область, страница строит план. Исполнение (сервер, шаги LLM отмечены): план для этого вида.</li>
+      <li>Новый сценарий открывает раздел S1, S2… Смена цели строит дочерние черновики (v2 → v2.1). Вопрос отвечает по фактам без пересчёта.</li>
+      <li>Строку ленты можно раскрыть: статус, вызовы LLM с повторами, входной и выходной JSON шага.</li>
+      <li>«Сохранить как черновик» создаёт одну неактивную версию прогноза в Kairon.</li>
+    </ol>
     <div class="muted" style="font-size:13px">Под каждым ответом блок «Технические детали»: сырой запрос, tool calls с JSON-схемами входа, тела запросов к LLM, время до первого токена, сырые ответы, вызовы Kairon и полный таймлайн событий.</div>
   </div>
 </main>
 <div class="wrap">
+  <div class="demo" id="demo"></div>
   <div class="composer">
     <textarea id="input">Разрешение на ввод в эксплуатацию (kolaudace) сдвигается на 3 месяца: с декабря 2027 на март 2028. Достройка растягивается, передача квартир и выход тоже сдвигаются. Как сохранить партнёрам IRR, обещанный в утверждённом бюджете?</textarea>
     <button id="send">Отправить</button>
@@ -259,7 +309,7 @@ svg text { font-size: 11px; }
   }).catch((e) => { infoEl.textContent = 'Каталог моделей недоступен: ' + e; });
 
   // ---------- idea ----------
-  function buildIdea(scenario) {
+  function buildIdea(scenario) { // stage 4 single-run plan, kept for reference; stage 5 builds plans in planFor
     return {
       schema: {},
       context: [{
@@ -407,7 +457,7 @@ svg text { font-size: 11px; }
   const fmtPct = (x) => NF2.format(x * 100) + ' %';
   const fmtPp = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + NF2.format(Math.abs(v)) + ' п.п.';
   const fmtMonths = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v) + ' мес';
-  const colorOf = (id) => id === 'active' ? 'var(--active)' : 'var(--v' + Math.min(Math.max(Number(id.slice(1)) || 1, 1), 4) + ')';
+  const colorOf = (id) => id === 'active' ? 'var(--active)' : 'var(--v' + Math.min(Math.max(parseInt(id.slice(1), 10) || 1, 1), 4) + ')';
   const dot = (id) => { const d = el('span', { class: 'dot' }); d.style.background = colorOf(id); return d; };
   const txt = (x, y, text, attrs) => { const t = svgEl('text', Object.assign({ x: x, y: y }, attrs || {})); t.textContent = text; return t; };
 
@@ -1088,28 +1138,78 @@ svg text { font-size: 11px; }
       el('thead', {}, [el('tr', {}, [el('th', { text: 't' }), el('th', { class: 'left', text: 'событие' }), el('th', { class: 'left', text: 'кратко' })])]), tbody])]);
   }
 
-  // ---------- run ----------
-  async function send() {
-    const scenario = inputEl.value.trim();
-    if (!scenario) return;
-    if (!keyEl.value && !serverKey && modelEl.value !== SAMPLE_MODEL) { keyEl.focus(); return; }
-    chat.appendChild(el('div', { class: 'msg user', text: scenario }));
-    const box = el('div', { class: 'msg' });
-    chat.appendChild(box);
-    const live = createLive(box);
-    window.scrollTo(0, document.body.scrollHeight);
-    sendEl.disabled = true;
+  // ---------- run (stage 5, DEV-1376) ----------
+  // Every message runs twice. Run 1 (planning, LLM) is kairon.route; the page then
+  // builds the execution plan for the routed kind. Run 2 (execution) is that plan.
+  // The session lives in this page: sections S1, S2…, their drafts with lineages,
+  // goals and merged facts. «Сохранить сессию» writes every run of every message as
+  // NDJSON; a saved file replays without the server.
+  const STEP_NAMES = {
+    'kairon.route': 'Маршрут',
+    'kairon.baseline': 'База из Kairon',
+    'kairon.structureScenario': 'Сценарий → структура',
+    'kairon.structureGoal': 'Цель → структура',
+    'kairon.proposeVariants': 'Варианты',
+    'kairon.buildGoalDrafts': 'Черновики',
+    'kairon.scoreVariants': 'Kairon evaluate · красные линии · сверки · ранжирование',
+    'kairon.planWidgets': 'Виджеты',
+    'kairon.explainVariants': 'Объяснение',
+    'kairon.answerQuestion': 'Ответ'
+  };
+  const KIND_WORDS = { generate: 'новый сценарий', goal_change: 'смена цели', question: 'вопрос · без пересчёта' };
+  const NO_SAMPLE_ANSWER = 'В образце нет ответа на эту фразу, выберите модель с ключом';
+  const session = { sections: [], selected: null, record: [] };
+  let R = null;
+  let demoPhrases = [];
+  const renderReady = import(API + '/kairon/assets/kairon-render.mjs').then((m) => {
+    R = m;
+    document.head.appendChild(el('style', { text: m.CARD_CSS }));
+  });
+  fetch(API + '/kairon/demo-phrases').then((r) => r.json()).then((j) => {
+    demoPhrases = j.phrases;
+    const box = $('demo');
+    j.phrases.forEach((p, i) => {
+      const b = el('button', { type: 'button', class: 'demo-chip', title: p, text: (i + 1) + '. ' + (p.length > 50 ? p.slice(0, 48) + '…' : p) });
+      b.addEventListener('click', () => { inputEl.value = p; inputEl.focus(); });
+      box.appendChild(b);
+    });
+  }).catch(() => { /* the chips are a convenience */ });
+
+  const currencyOf = () => ({ decimals: money.decimals, currencyCode: money.code });
+  const errbox = (text) => el('div', { class: 'errbox', text });
+  const htmlBlock = (cls, html) => { const d = el('div', { class: cls }); d.innerHTML = html; return d; };
+  const widgetBox = (title, tag, html) =>
+    htmlBlock('k-widget', '<div class="k-wh"><b>' + R.esc(title) + '</b>' + (tag ? '<span class="k-tag">' + R.esc(tag) + '</span>' : '') + '</div>' + html);
+
+  function ideaOf(calls) {
+    return {
+      schema: {},
+      context: [{ type: 'plan', plan: { title: 'Kairon forecast agent', description: 'DEV-1364 stage 5', reasoning: 'The LLM proposes, the server computes.', calls } }],
+      solution: null
+    };
+  }
+
+  /** Reads run.start / run.done / run.error off a run's events. */
+  function runOf(events, failure) {
+    const start = events.find((e) => e.type === 'run.start');
+    const done = events.find((e) => e.type === 'run.done');
+    const error = events.find((e) => e.type === 'run.error');
+    return {
+      events,
+      runRequest: start ? start.payload.request : null,
+      solution: done ? done.payload.solution : null,
+      failure: failure || (error ? error.payload.class + ': ' + error.payload.message : null)
+    };
+  }
+
+  async function streamRun(calls, onEvent) {
     const events = [];
-    let runRequest = null, solution = null, failure = null;
     try {
       const resp = await fetch(API + '/kairon/run', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ idea: buildIdea(scenario), providerConfig: { model: modelEl.value, apiKey: keyEl.value } })
+        body: JSON.stringify({ idea: ideaOf(calls), providerConfig: { model: modelEl.value, apiKey: keyEl.value } })
       });
-      if (!resp.ok || !resp.body) {
-        const text = await resp.text();
-        throw new Error('HTTP ' + resp.status + ': ' + text);
-      }
+      if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status + ': ' + await resp.text());
       const reader = resp.body.getReader(), decoder = new TextDecoder();
       let buffer = '';
       for (;;) {
@@ -1121,32 +1221,377 @@ svg text { font-size: 11px; }
           if (!line) continue;
           const ev = JSON.parse(line);
           events.push(ev);
-          if (ev.type === 'run.start') runRequest = ev.payload.request;
-          if (ev.type === 'run.done') solution = ev.payload.solution;
-          if (ev.type === 'run.error') failure = ev.payload.class + ': ' + ev.payload.message;
-          live.onEvent(ev);
+          onEvent(ev);
         }
       }
     } catch (err) {
-      failure = String(err);
+      return runOf(events, String(err));
     }
-    const last = events[events.length - 1];
-    live.status.textContent = (failure ? 'Ошибка' : 'Готово') + ' за ' + ms(last ? last.t : null) + ', событий: ' + events.length;
-    if (failure) box.appendChild(el('div', { class: 'errbox', text: failure }));
-    if (solution) {
-      const out = solution.output;
-      renderAnswer(box, out);
-      history.push({ user: scenario, summary: summaryForHistory(out) });
+    return runOf(events, null);
+  }
+
+  const liveRunner = () => (calls, onEvent) => streamRun(calls, onEvent);
+  /** Feeds recorded runs in order; the plan built on replay is not sent anywhere. */
+  function replayRunner(runs) {
+    let i = 0;
+    return async (_calls, onEvent) => {
+      const run = runs[i++];
+      if (!run) return runOf([], 'В файле нет этого прогона');
+      run.events.forEach(onEvent);
+      return run;
+    };
+  }
+
+  // ---------- ribbon ----------
+  function specText(spec) {
+    if (!spec || spec.type !== 'cost_change') return 'свободный сценарий';
+    return spec.lineCodes.join(', ') + ' × ' + (spec.factorPpm / 1e6).toFixed(2).replace('.', ',') + ' с ' + spec.fromMonth;
+  }
+  function goalText(g) {
+    if (g.type === 'funding_cover') return 'покрывает ' + g.partnerId + ': ' + g.months + ' мес. с ' + g.fromMonth;
+    if (g.type === 'irr_floor') return 'IRR не ниже обещания: ' + g.partnerIds.join(', ');
+    return 'чистая прибыль ' + (g.basis === 'delta' ? R.delta(g.amountMinor, currencyOf()) + ' млн к родителю' : 'не ниже ' + R.millions(g.amountMinor, currencyOf()) + ' млн');
+  }
+  function summaryOf(tool, out) {
+    if (!out) return '';
+    if (tool === 'kairon.route') return KIND_WORDS[out.kind] + (out.scope.length ? ' · ' + out.scope.join(', ') : '') + (out.error ? ' · ' + out.error : '');
+    if (tool === 'kairon.baseline') return out.forecastVersion.name + ' · закрыто по ' + out.closedThrough;
+    if (tool === 'kairon.structureScenario') return out.errors.length ? 'не разобран: ' + out.errors.join('; ') : specText(out.spec);
+    if (tool === 'kairon.structureGoal') return out.goal ? goalText(out.goal) : 'не разобрана: ' + out.errors.join('; ');
+    if (tool === 'kairon.proposeVariants') return out.errors && out.errors.length ? 'LLM не спрашивали: сценарий не разобран' : 'принято ' + out.variants.length + (out.rejected.length ? ', отклонено ' + out.rejected.length : '');
+    if (tool === 'kairon.buildGoalDrafts') return 'черновиков ' + out.variants.length + (out.answers.length ? ', ответов ' + out.answers.length : '');
+    if (tool === 'kairon.scoreVariants') return 'посчитано ' + out.variants.filter((v) => v.status === 'ok').length + ' из ' + out.variants.length + (out.ranking.length ? ' · ранг ' + out.ranking.join(' > ') : '');
+    if (tool === 'kairon.planWidgets') return Object.entries(out.widgets).map(([id, ws]) => id + ': ' + ws.map((w) => w.widget).join(', ')).join(' · ') || 'виджетов нет';
+    if (tool === 'kairon.explainVariants') return out.recommendation ? 'рекомендует ' + out.recommendation : (out.headline || '').slice(0, 90);
+    if (tool === 'kairon.answerQuestion') return (out.answer || '').slice(0, 90);
+    return '';
+  }
+
+  /** One ribbon row: mark, name, LLM / server tag, duration, summary; opens to status, input and output JSON. */
+  function makeRow(name, kind, input) {
+    const mark = el('span', { class: 'mk run', text: '●' });
+    const dur = el('span', { class: 't', text: '' });
+    const sub = el('span', { class: 'sub', text: 'выполняется…' });
+    const who = kind === 'latent' ? el('span', { class: 'who llm', text: 'LLM' }) : kind === 'page' ? el('span', { class: 'who', text: 'страница' }) : el('span', { class: 'who srv', text: 'сервер' });
+    const status = el('div', { class: 'k-status' });
+    const io = el('div', { class: 'k-io' }, [status, lazyJson('Вход JSON', input === undefined ? null : input)]);
+    const row = el('details', { class: 'k-row' }, [el('summary', {}, [mark, el('span', { text: name }), who, dur, sub]), io]);
+    const calls = new Map();
+    const line = (text) => status.appendChild(el('div', { text }));
+    return {
+      node: row,
+      llmRequest(p) { calls.set(p.callId, line((p.label || p.callId) + ': запрос → ' + p.body.model)); },
+      llmDone(p) {
+        const n = calls.get(p.callId);
+        const u = p.usage || {};
+        const text = (p.label || p.callId) + ': ответ за ' + ms(p.ms) + ', токены ' + (u.prompt_tokens ?? 'н/д') + ' → ' + (u.completion_tokens ?? 'н/д') + ', ' + usd(u.cost) + ', finish ' + (p.finishReason || 'н/д');
+        if (n) n.textContent = text; else line(text);
+      },
+      llmError(p) { line((p.callId || '') + ': ошибка ' + p.status); },
+      kairon(p) { line('Kairon ' + p.method + ' ' + p.op + ' → ' + (p.status ?? 'ошибка') + ' за ' + ms(p.ms)); },
+      finish(ok, msValue, output, summary) {
+        mark.className = 'mk ' + (ok ? 'ok' : 'bad');
+        mark.textContent = ok ? '✓' : '✗';
+        dur.textContent = ms(msValue);
+        sub.textContent = summary;
+        io.appendChild(lazyJson(ok ? 'Выход JSON' : 'Ошибка', output));
+      }
+    };
+  }
+
+  function rowTracker(container) {
+    let current = null;
+    return (ev) => {
+      const p = ev.payload || {};
+      if (ev.type === 'tool.start') {
+        current = makeRow(STEP_NAMES[p.tool] || p.tool, p.kind, p.args);
+        current.tool = p.tool;
+        container.appendChild(current.node);
+        return;
+      }
+      if (!current) return;
+      if (ev.type === 'tool.end') { current.finish(true, p.ms, p.output, summaryOf(current.tool, p.output)); current = null; }
+      else if (ev.type === 'tool.error') { current.finish(false, p.ms, { error: p.message }, p.message); current = null; }
+      else if (ev.type === 'llm.request') current.llmRequest(p);
+      else if (ev.type === 'llm.done') current.llmDone(p);
+      else if (ev.type === 'llm.error') current.llmError(p);
+      else if (ev.type === 'kairon.call') current.kairon(p);
+    };
+  }
+
+  function createRibbon(box) {
+    const planRows = el('div', {});
+    const execRows = el('div', {});
+    box.appendChild(el('div', { class: 'ribbon' }, [
+      el('div', { class: 'band k-plan' }, [el('div', { class: 'band-h', text: 'Планирование · LLM' }), planRows]),
+      el('div', { class: 'divider k-plan', text: 'исполнение плана' }),
+      el('div', { class: 'band k-exec' }, [el('div', { class: 'band-h', text: 'Исполнение · сервер, шаги LLM отмечены' }), execRows]),
+      el('div', { class: 'divider k-exec', text: 'результат' })
+    ]));
+    return { planRows, execRows };
+  }
+
+  // ---------- session ----------
+  const activeSection = () => {
+    const sel = session.selected && session.sections.find((s) => s.id === session.selected.section);
+    return sel || session.sections[session.sections.length - 1] || null;
+  };
+  const draftList = (section) => [...section.drafts.values()].map((v) => ({ id: v.id, title: v.title }));
+  /** Drafts without a child in the section: «все варианты» continues each line of drafts. */
+  const leaves = (section) => [...section.drafts.values()].filter((v) => v.status === 'ok' && ![...section.drafts.values()].some((c) => c.parentId === v.id)).map((v) => v.id);
+
+  function planFor(route, text, section) {
+    const call = (tool, out, args) => Object.assign({ _tool: tool, _outputPath: '†state.' + out }, args);
+    if (route.kind === 'generate') {
+      const id = 'S' + (session.sections.length + 1);
+      return {
+        kind: 'generate', sectionId: id, scopeText: 'раздел ' + id,
+        calls: [
+          call('kairon.baseline', 'baseline', {}),
+          call('kairon.structureScenario', 'scenario', { message: text, baseline: '†state.baseline' }),
+          call('kairon.proposeVariants', 'proposals', { scenario: text, baseline: '†state.baseline', history: history.slice(-3), count: Number(countEl.value),
+            scenarioSpec: '†state.scenario.spec', scenarioErrors: '†state.scenario.errors', section: id }),
+          call('kairon.scoreVariants', 'scored', { baseline: '†state.baseline', proposals: '†state.proposals', parents: [], goals: [] }),
+          call('kairon.planWidgets', 'widgets', { scored: '†state.scored' }),
+          call('kairon.explainVariants', 'explanation', { scenario: text, scored: '†state.scored' })
+        ]
+      };
+    }
+    if (route.kind === 'question') {
+      return {
+        kind: 'question', sectionId: section ? section.id : null, scopeText: section ? 'раздел ' + section.id : 'вариантов нет',
+        calls: [call('kairon.answerQuestion', 'answer', { question: text, facts: section ? section.facts : {}, drafts: section ? draftList(section) : [] })]
+      };
+    }
+    if (!section) return { kind: 'goal_change', error: 'Вариантов ещё нет: сначала опишите сценарий.', calls: [] };
+    const ids = route.scope.includes('all') ? leaves(section) : route.scope.filter((id) => section.drafts.has(id));
+    if (ids.length === 0) return { kind: 'goal_change', error: 'Не выбран вариант: кликните карточку или напишите «по всем вариантам».', calls: [] };
+    const parents = ids.map((id) => ({ id, lineage: section.drafts.get(id).lineage }));
+    return {
+      kind: 'goal_change', sectionId: section.id, scopeText: 'область: ' + section.id + ' · ' + ids.join(', '), parents,
+      calls: [
+        call('kairon.baseline', 'baseline', {}),
+        call('kairon.structureGoal', 'goal', { message: text, baseline: '†state.baseline', scope: ids }),
+        call('kairon.buildGoalDrafts', 'drafts', { baseline: '†state.baseline', goal: '†state.goal.goal', parents, existingIds: [...section.drafts.keys()], message: text, history: history.slice(-3) }),
+        call('kairon.scoreVariants', 'scored', { baseline: '†state.baseline', proposals: '†state.drafts', parents, goals: section.goals.concat(['†state.goal.goal']) }),
+        call('kairon.planWidgets', 'widgets', { scored: '†state.scored' }),
+        call('kairon.explainVariants', 'explanation', { scenario: text, scored: '†state.scored' })
+      ]
+    };
+  }
+
+  function renderChips(section) {
+    section.chips.textContent = '';
+    if (section.goals.length === 0) { section.chips.appendChild(el('span', { class: 'muted', text: 'Целей нет: ранжирование по обещанию партнёрам' })); return; }
+    section.goals.forEach((g, i) => {
+      const x = el('button', { type: 'button', title: 'Убрать цель', text: '×' });
+      x.addEventListener('click', () => { section.goals.splice(i, 1); renderChips(section); });
+      section.chips.appendChild(el('span', { class: 'k-chip' }, [goalText(g), x]));
+    });
+  }
+  function addGoal(section, goal) {
+    section.goals = section.goals.filter((g) => g.type !== goal.type).concat([goal]);
+    renderChips(section);
+  }
+  function openSection(id, scenario, out, holder) {
+    const chips = el('span', {});
+    const section = { id, scenario, spec: out.scenario.spec, drafts: new Map(), goals: [], facts: {}, chips };
+    session.sections.push(section);
+    holder.appendChild(el('div', { class: 'sec-h' }, [el('b', { text: id }), el('span', { text: scenario + ' · ' + specText(out.scenario.spec) }), el('span', { class: 'muted', text: 'цели:' }), chips]));
+    renderChips(section);
+    return section;
+  }
+
+  function saveRow(section, v) {
+    const name = el('input', { size: 48, value: (section.id + ' · ' + v.id + ' · ' + v.title).slice(0, 120) });
+    const btn = el('button', { type: 'button', text: 'Сохранить как черновик' });
+    const note = el('span', { class: 'muted', text: 'Создаст одну неактивную версию прогноза в Kairon.' });
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; note.textContent = 'Сохраняю…';
+      try {
+        const r = await fetch(API + '/kairon/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: name.value, lineage: v.lineage }) });
+        const j = await r.json();
+        if (r.ok) note.textContent = 'Создан черновик «' + j.name + '» (' + j.versionId + '). Версия не активна: активировать её можно только в Kairon.';
+        else { note.textContent = 'Не сохранено: ' + j.error; btn.disabled = false; }
+      } catch (err) { note.textContent = String(err); btn.disabled = false; }
+    });
+    return el('div', { class: 'save-row' }, [name, btn, note]);
+  }
+
+  function draftCard(section, v, out, ctx) {
+    const e = out.explanation, cur = currencyOf();
+    const card = el('div', { class: 'k-card' });
+    card.appendChild(el('div', { class: 'k-card-h' }, [
+      el('b', { text: section.id + ' · ' + v.id + ' · ' + v.title }),
+      el('span', { class: 'muted', text: 'от ' + (v.parentId || 'активного прогноза') + ' · изменено: ' + (v.changed.map((c) => c.path + ' (' + c.cells + ')').join(', ') || 'ничего') })
+    ]));
+    card.appendChild(widgetBox('Вердикт', 'статусы: сервер · фраза: LLM, числа из фактов', R.renderVerdict(e, v)));
+    card.appendChild(widgetBox('Кто что получил', 'b4', R.renderStakeholders(v, e)));
+    card.appendChild(widgetBox('Красные линии', 'что нельзя нарушить · в базе: статус родителя', R.renderRedLines(v.redLines, cur)));
+    card.appendChild(widgetBox('Цель', 'b1 · по каждой части прогноза', R.renderGoalChecks(v.goalChecks)));
+    card.appendChild(widgetBox('Сверки', 'черновик сходится сам с собой и с Kairon', R.renderReconciliations(v.reconciliations)));
+    if (v.diffView) card.appendChild(widgetBox('Что меняется против родителя', 'копия diff-вида Kairon', R.renderDiffView(v.diffView, cur)));
+    const specs = ((out.widgets || {}).widgets || {})[v.id] || [];
+    if (v.widgetInputs) specs.forEach((spec) => card.appendChild(htmlBlock('', R.renderWidget(spec, v, v.widgetInputs.parent, v.widgetInputs.draft, cur))));
+    card.appendChild(variantPanel(v, ctx));
+    card.appendChild(saveRow(section, v));
+    return card;
+  }
+
+  function renderRun(result, section, out, answers) {
+    const b = out.baseline, s = out.scored, e = out.explanation;
+    money.decimals = b.project.decimals; money.code = b.project.currencyCode;
+    s.variants.forEach((v) => section.drafts.set(v.id, v));
+    Object.assign(section.facts, s.facts);
+    if (answers.length) result.appendChild(el('ul', { class: 'answers' }, answers.map((a) => el('li', { text: a.text }))));
+    const ranked = s.ranking.map((id) => s.variants.find((v) => v.id === id)).filter((v) => v && v.status === 'ok');
+    s.variants.filter((v) => v.status !== 'ok').forEach((v) => result.appendChild(errbox(v.id + ' «' + v.title + '» не посчитан: ' + v.errors.join('; '))));
+    if (ranked.length === 0) { if (answers.length === 0) result.appendChild(errbox(e.headline)); return; }
+    const reco = e.recommendation || e.topRanked || ranked[0].id;
+    const ctx = { promise: s.approved, active: s.active, v1: ranked.find((v) => v.id === 'v1') || null, reco, explanation: e, milestones: b.milestones };
+    const overview = widgetBox('Рекомендация и почему', 'ранжирование: сервер · текст: LLM с плейсхолдерами', R.renderOverview(e, s));
+    result.appendChild(overview);
+    if (e.unknownPlaceholders.length) result.appendChild(el('div', { class: 'warnbox', text: 'LLM сослалась на несуществующие факты: ' + e.unknownPlaceholders.join(', ') }));
+    if (e.literalNumbers.length) result.appendChild(el('div', { class: 'warnbox', text: 'Числа, написанные LLM, а не взятые из evaluate: ' + e.literalNumbers.join(', ') }));
+    const tabs = el('div', { class: 'dtabs', role: 'tablist', 'aria-label': 'Черновики' });
+    const holder = el('div', {});
+    const select = (id) => {
+      session.selected = { section: section.id, id };
+      tabs.querySelectorAll('.dtab').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.id === id)));
+      holder.textContent = '';
+      const v = ranked.find((x) => x.id === id);
+      if (v) holder.appendChild(draftCard(section, v, out, ctx));
+    };
+    ranked.forEach((v) => {
+      const t = el('button', { type: 'button', class: 'dtab', role: 'tab', text: section.id + ' · ' + v.id + (v.id === reco ? ' · рекомендован' : '') + ' · ' + v.title });
+      t.dataset.id = v.id;
+      t.addEventListener('click', () => select(v.id));
+      tabs.appendChild(t);
+    });
+    const note = el('div', { class: 'switch-note' });
+    overview.querySelectorAll('.k-switch-btn').forEach((btn) => btn.addEventListener('click', () => {
+      const sw = (e.switches || []).find((x) => x.label + ' → ' + x.winner === btn.textContent);
+      if (!sw) return;
+      note.textContent = 'Под цель «' + sw.label + '» первым становится ' + sw.winner + '. Новых черновиков не создано.';
+      select(sw.winner);
+    }));
+    overview.appendChild(note);
+    result.appendChild(tabs);
+    result.appendChild(holder);
+    select(ranked.some((v) => v.id === reco) ? reco : ranked[0].id);
+  }
+
+  function toolOutput(events, tool) {
+    let inside = false;
+    for (const ev of events) {
+      if (ev.type === 'tool.start') inside = ev.payload.tool === tool;
+      if (ev.type === 'tool.end' && inside) return ev.payload.output;
+    }
+    return null;
+  }
+
+  function applyResult(plan, run, result, text) {
+    if (!run.solution) {
+      const goal = toolOutput(run.events, 'kairon.structureGoal');
+      result.appendChild(errbox(goal && goal.errors && goal.errors.length ? 'Цель не разобрана: ' + goal.errors.join('; ') : 'Ошибка: ' + (run.failure || 'прогон не завершился')));
+      return;
+    }
+    const out = run.solution.output;
+    if (plan.kind === 'question') {
+      const a = out.answer;
+      result.appendChild(el('p', { class: 'lead', text: a.answer }));
+      if (a.unknownPlaceholders.length) result.appendChild(el('div', { class: 'warnbox', text: 'LLM сослалась на несуществующие факты: ' + a.unknownPlaceholders.join(', ') }));
+      if (a.literalNumbers.length) result.appendChild(el('div', { class: 'warnbox', text: 'Числа, написанные LLM, а не взятые из evaluate: ' + a.literalNumbers.join(', ') }));
+      return;
+    }
+    if (plan.kind === 'generate') {
+      if (out.proposals.errors.length) { result.appendChild(errbox('Сценарий не разобран, LLM варианты не предлагала: ' + out.proposals.errors.join('; '))); return; }
+      const section = openSection(plan.sectionId, text, out, result);
+      renderRun(result, section, out, []);
+      history.push({ user: text, summary: summaryForHistory(out) });
+      return;
+    }
+    const section = session.sections.find((s) => s.id === plan.sectionId);
+    addGoal(section, out.goal.goal);
+    renderRun(result, section, out, out.drafts.answers);
+  }
+
+  async function handleMessage(text, runner) {
+    chat.appendChild(el('div', { class: 'msg user', text }));
+    const box = el('div', { class: 'msg' });
+    chat.appendChild(box);
+    const badge = el('span', { class: 'badge-route', text: 'маршрут…' });
+    box.appendChild(badge);
+    const ribbon = createRibbon(box);
+    const result = el('div', {});
+    box.appendChild(result);
+    window.scrollTo(0, document.body.scrollHeight);
+    await renderReady;
+    const section = activeSection();
+    const selected = session.selected && section && session.selected.section === section.id ? session.selected.id : null;
+    const routeCalls = [{ _tool: 'kairon.route', _outputPath: '†state.route', message: text, drafts: section ? draftList(section) : [], selected }];
+    const run1 = await runner(routeCalls, rowTracker(ribbon.planRows));
+    session.record.push({ message: text, step: 'route', run: run1 });
+    const route = run1.solution && run1.solution.output.route;
+    if (!route) { badge.textContent = 'маршрут не получен'; result.appendChild(errbox('Маршрут не получен: ' + (run1.failure || 'нет ответа'))); return; }
+    const plan = planFor(route, text, section);
+    badge.textContent = KIND_WORDS[plan.kind] + (plan.scopeText ? ' · ' + plan.scopeText : '');
+    const planRow = makeRow('План', 'page', route);
+    planRow.finish(!plan.error, 0, plan.error ? { error: plan.error } : plan.calls, plan.error || plan.calls.map((c) => STEP_NAMES[c._tool] || c._tool).join(' → '));
+    ribbon.planRows.appendChild(planRow.node);
+    if (plan.error) { result.appendChild(errbox(plan.error)); return; }
+    const run2 = await runner(plan.calls, rowTracker(ribbon.execRows));
+    session.record.push({ message: text, step: 'execute', run: run2 });
+    applyResult(plan, run2, result, text);
+    if (run2.runRequest) box.appendChild(renderTrace(run2.events, run2.runRequest, run2.solution));
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+
+  async function send() {
+    const text = inputEl.value.trim();
+    if (!text) return;
+    if (!keyEl.value && !serverKey && modelEl.value !== SAMPLE_MODEL) { keyEl.focus(); return; }
+    if (modelEl.value === SAMPLE_MODEL && demoPhrases.length && !demoPhrases.includes(text)) {
+      chat.appendChild(el('div', { class: 'msg user', text }));
+      chat.appendChild(el('div', { class: 'msg' }, [errbox(NO_SAMPLE_ANSWER)]));
+      return;
+    }
+    sendEl.disabled = true;
+    try {
+      await handleMessage(text, liveRunner());
       inputEl.value = '';
+    } catch (err) {
+      chat.appendChild(el('div', { class: 'msg errbox', text: String(err) }));
     }
-    if (runRequest) box.appendChild(renderTrace(events, runRequest, solution));
     sendEl.disabled = false;
   }
   sendEl.addEventListener('click', send);
 
-  /** Replays a saved run (.ndjson from the trace's download button) without calling the server. */
+  /** Every run of every message, each preceded by a session.run marker line. */
+  $('saveSession').addEventListener('click', () => {
+    const lines = session.record.flatMap((r) => [JSON.stringify({ t: 0, type: 'session.run', payload: { message: r.message, step: r.step } })].concat(r.run.events.map((e) => JSON.stringify(e))));
+    const a = el('a', { href: URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'application/x-ndjson' })), download: 'kairon-session-' + new Date().toISOString().slice(0, 19).split(':').join('-') + '.ndjson' });
+    a.click();
+  });
+
+  /** Replays a saved file without the server: a stage 5 session file, or a stage 4 single run. */
   async function replay(file) {
     const events = (await file.text()).split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l));
+    if (events.some((ev) => ev.type === 'session.run')) {
+      const messages = [];
+      events.forEach((ev) => {
+        if (ev.type === 'session.run') {
+          const last = messages[messages.length - 1];
+          if (ev.payload.step === 'route' || !last) messages.push({ text: ev.payload.message, runs: [] });
+          messages[messages.length - 1].runs.push([]);
+          return;
+        }
+        const m = messages[messages.length - 1];
+        if (m) m.runs[m.runs.length - 1].push(ev);
+      });
+      for (const m of messages) await handleMessage(m.text, replayRunner(m.runs.map((evs) => runOf(evs, null))));
+      return;
+    }
     const start = events.find((ev) => ev.type === 'run.start');
     const done = events.find((ev) => ev.type === 'run.done');
     const runRequest = start ? start.payload.request : null;
@@ -1156,7 +1601,7 @@ svg text { font-size: 11px; }
     const box = el('div', { class: 'msg' });
     chat.appendChild(box);
     if (done) renderAnswer(box, done.payload.solution.output);
-    else box.appendChild(el('div', { class: 'errbox', text: 'В файле нет run.done: прогон не завершился.' }));
+    else box.appendChild(errbox('В файле нет run.done: прогон не завершился.'));
     if (runRequest) box.appendChild(renderTrace(events, runRequest, done ? done.payload.solution : null));
   }
   replayEl.addEventListener('change', () => { const f = replayEl.files && replayEl.files[0]; if (f) replay(f).catch((e) => chat.appendChild(el('div', { class: 'msg errbox', text: String(e) }))); replayEl.value = ''; });

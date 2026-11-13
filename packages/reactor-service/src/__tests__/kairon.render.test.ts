@@ -229,6 +229,29 @@ describe('kairon render: widgets', () => {
     expect(html.split('<g class="k-pair"').length - 1).toBe(8);
     expect(html).toContain('подпись: Δ Cedar Partners loan, млн');
   });
+
+  it('keeps 52 units per month when 22 months changed, so labels never overlap', () => {
+    // SCENARIO: a price lever moves the funding rule's tranches in 22 months (stage 5 demo phrase 5)
+    // INPUT: one source, parent 10,0 млн and draft 10,2 млн in every month 2026-09..2028-06
+    // EXPECTED: 22 pairs; viewBox width 30 + 22 × 52 + 4 = 1178; the SVG is drawn 1767 px wide and scrolls in its card
+    const months = Array.from({ length: 22 }, (_, i) => `${2026 + Math.floor((8 + i) / 12)}-${String(((8 + i) % 12) + 1).padStart(2, '0')}`);
+    const inputs = (amountMinor: string) => ({
+      draws: months.map((m) => ({ sourceId: 'cedar', period: `${m}-01`, amountMinor })),
+      walk: { sources: [{ id: 'cedar', name: 'Cedar Partners loan' }], cashNeedMinor: '0' },
+      sourceGroups: [],
+    });
+    const html = render.renderWidget(barsSpec, { id: 'v1.1', goalChecks: [] }, inputs('1000000000'), inputs('1020000000'));
+    expect(html.split('<g class="k-pair"').length - 1).toBe(22);
+    expect(html).toContain('<svg viewBox="0 0 1178 190" width="1767" height="285" role="img"');
+  });
+
+  it('draws the 8 cover months at 52 units each, 675 px wide', () => {
+    // SCENARIO: the Cedar cover draft from the test above, 8 changed months
+    // INPUT: bars-before-after spec, eval-active and cover-cedar.eval
+    // EXPECTED: viewBox width 30 + 8 × 52 + 4 = 450, drawn 675 × 285 px
+    const html = render.renderWidget(barsSpec, coverDraft, parentEval, draftEval);
+    expect(html).toContain('<svg viewBox="0 0 450 190" width="675" height="285" role="img"');
+  });
 });
 
 describe('kairon render: diff view copy', () => {

@@ -373,7 +373,9 @@ function barsBeforeAfter(variant, parentEval, draftEval, currency) {
   if (v.months.length === 0) return '<div class="k-muted">Транши не изменились.</div>';
   const height = (cells, m) => v.sources.reduce((acc, s) => acc + Math.max(Number(cells.get(`${s.id}|${m}`) ?? 0n), 0), 0);
   const max = Math.max(1, ...v.months.flatMap((m) => [height(v.parent, m), height(v.draft, m)]));
-  const slot = 406 / v.months.length;
+  // At least 52 units per month keeps the month and delta labels apart; a wider chart scrolls inside its card.
+  const slot = Math.max(406 / v.months.length, 52);
+  const plotRight = 30 + v.months.length * slot;
   const w = Math.max(Math.min(18, slot / 2 - 3), 2);
   const scale = (minor) => (152 * Math.max(Number(minor), 0)) / max;
   const labelled = labelledSource(v, variant, draftEval);
@@ -405,8 +407,8 @@ function barsBeforeAfter(variant, parentEval, draftEval, currency) {
   const swatches = v.sources.map((s, i) => `<span><span class="k-sw" style="background:${PALETTE[i % PALETTE.length]}"></span>${esc(s.name)}</span>`);
   const note = labelled === null ? '' : ` · подпись: Δ ${esc(labelled.name)}, млн`;
   return (
-    `<svg viewBox="0 0 440 190" width="100%" role="img" aria-label="Транши по месяцам: родитель и черновик">` +
-    `<line x1="30" x2="436" y1="166" y2="166" stroke="var(--border)" stroke-width="1"/>${shade}${pairs.join('')}</svg>` +
+    `<svg viewBox="0 0 ${Math.round(plotRight + 4)} 190" width="${Math.round((plotRight + 4) * 1.5)}" height="285" role="img" aria-label="Транши по месяцам: родитель и черновик">` +
+    `<line x1="30" x2="${plotRight.toFixed(1)}" y1="166" y2="166" stroke="var(--border)" stroke-width="1"/>${shade}${pairs.join('')}</svg>` +
     `<div class="k-legend">${swatches.join('')}<span>бледный: родитель · яркий: черновик${note}</span></div>`
   );
 }

@@ -164,6 +164,16 @@ describe('kairon createSampleLLM, stage 5 demo phrases', () => {
     expect(answers.flatMap((a) => violations(schema, a))).toEqual([]);
   });
 
+  it('routes the profit phrase by the message when a draft title repeats the construction phrase', async () => {
+    // SCENARIO: section S2 holds v1 titled with the construction phrase; the user types the profit phrase
+    // INPUT: routeUserPrompt(profit phrase, [{ v1: construction phrase }], 'v1')
+    // EXPECTED: goal_change with scope [] (the selected card), the draft list never picks the phrase
+    const drafts = [{ id: 'v1', title: 'Стройка дорожает на 8 % с 2026-09' }];
+    const schema = routeJsonSchema(drafts.map((d) => d.id));
+    const answer = await ask('route', routeUserPrompt('Хочу добиться чистой прибыли в +10 000 000', drafts, 'v1'), schema);
+    expect(answer).toEqual({ kind: 'goal_change', scope: [] });
+  });
+
   it('structures the construction phrase as a cost change and the stage 4 phrase as free', async () => {
     // SCENARIO: the structuring step for the two generate phrases
     // INPUT: «Стройка дорожает на 8 % с 2026-09» and the stage 4 phrase
@@ -260,12 +270,12 @@ describe('kairon createSampleLLM, stage 5 demo phrases', () => {
   it('answers «Почему v2 выше v3?» with server figures', async () => {
     // SCENARIO: a question about the ranking
     // INPUT: answerQuestion request with the question
-    // EXPECTED: valid; an answer citing v2 and v3 IRR and profit placeholders
+    // EXPECTED: valid; v2 is higher on Solstice IRR, the server ranks v3 above v2 (closer to the promise, not below it)
     const schema = answerJsonSchema();
     const answer = await ask('answerQuestion', `QUESTION:\n${WHY}`, schema);
     expect(answer).toEqual({
       answer:
-        'v2 выше v3 по правилам ранжирования сервера: IRR Solstice {{v2.irr.solstice}} против {{v3.irr.solstice}} при обещании {{approved.irr.solstice}}, чистая прибыль {{v2.d.netProfit}} против {{v3.d.netProfit}}.',
+        'По IRR Solstice v2 выше v3: {{v2.irr.solstice}} против {{v3.irr.solstice}}, чистая прибыль {{v2.d.netProfit}} против {{v3.d.netProfit}}. В ранжировании сервера v3 стоит выше v2: правило берёт IRR не ниже обещания {{approved.irr.solstice}} и ближайший к нему, у v3 он ближе.',
     });
     expect(violations(schema, answer)).toEqual([]);
   });
