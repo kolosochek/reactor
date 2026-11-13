@@ -68,7 +68,8 @@ function drawsEqualNeed(e: Evaluation, money: (minor: bigint) => string): Reconc
   };
 }
 
-function changedCells(parent: EvaluateBody, draft: EvaluateBody): Map<string, number> {
+/** Plan cells the draft changed against the parent, counted per line code. */
+export function changedPlanCells(parent: EvaluateBody, draft: EvaluateBody): Map<string, number> {
   const before = new Map(parent.plan.lines.map((l) => [l.code, l.monthlyForecast]));
   const changed = new Map<string, number>();
   for (const line of draft.plan.lines) {
@@ -88,7 +89,7 @@ function onlyAsked(
   askedDrawSourceIds: string[],
 ): Reconciliation {
   const source = 'diff(parentBody, draftBody): plan cells, draws';
-  const cells = changedCells(parent, draft);
+  const cells = changedPlanCells(parent, draft);
   const parentDraws = new Set(z.array(BodyDraw).parse(parent.draws ?? []).map((d) => `${d.sourceId}|${d.date}|${d.amountMinor}`));
   const newDraws = z
     .array(BodyDraw)
