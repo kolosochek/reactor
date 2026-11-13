@@ -150,3 +150,55 @@ export function normalizeStrictAnswer(value: unknown): unknown {
   }
   return out;
 }
+
+/** The first {...} block of an LLM reply, parsed; throws when there is none. */
+export function parseJsonObject(content: string): unknown {
+  const start = content.indexOf('{');
+  const end = content.lastIndexOf('}');
+  if (start === -1 || end <= start) throw new Error('no JSON object in the reply');
+  return JSON.parse(content.slice(start, end + 1));
+}
+
+export const CUT_OFF_ERROR = 'reply: cut off at the token limit (finish_reason length) before the JSON closed';
+
+/** kairon.route: the message kind and the draft ids it is about. */
+export function routeJsonSchema(draftIds: string[], options: { relaxed?: boolean } = {}): ProposalJsonSchema {
+  const id: JsonSchema =
+    options.relaxed === true ? { type: 'string', description: `A draft id or "all": ${[...draftIds, 'all'].join(', ')}` } : { type: 'string', enum: [...draftIds, 'all'] };
+  return closed({
+    kind: { type: 'string', enum: ['generate', 'goal_change', 'question'] },
+    scope: arrayOf(id, '[] = the selected card; ["all"] = every variant'),
+  }) as ProposalJsonSchema;
+}
+
+/** kairon.structureScenario: a stated cost change, or free for anything else. */
+export function scenarioJsonSchema(lineCodes: string[], months: string[], options: { relaxed?: boolean } = {}): ProposalJsonSchema {
+  const relaxed = options.relaxed === true;
+  const month: JsonSchema = relaxed
+    ? { type: 'string', description: `YYYY-MM, ${months[0] ?? ''}..${months[months.length - 1] ?? ''}` }
+    : { type: 'string', enum: months };
+  return closed({
+    type: { type: 'string', enum: ['cost_change', 'free'] },
+    lineCodes: arrayOf(relaxed ? { type: 'string' } : { type: 'string', enum: lineCodes }, 'Lines the change applies to; [] for free'),
+    fromMonth: nullable(month),
+    factorPpm: nullable(int(500000, 2000000, relaxed, '1080000 = +8 %')),
+  }) as ProposalJsonSchema;
+}
+
+/** kairon.structureGoal: one of the three goal types; unused keys are null or []. */
+export function goalJsonSchema(partnerIds: string[], months: string[], options: { relaxed?: boolean } = {}): ProposalJsonSchema {
+  const relaxed = options.relaxed === true;
+  const partner: JsonSchema = relaxed ? { type: 'string', description: partnerIds.join(', ') } : { type: 'string', enum: partnerIds };
+  const month: JsonSchema = relaxed
+    ? { type: 'string', description: `YYYY-MM, ${months[0] ?? ''}..${months[months.length - 1] ?? ''}` }
+    : { type: 'string', enum: months };
+  return closed({
+    type: { type: 'string', enum: ['funding_cover', 'irr_floor', 'net_profit_target'] },
+    partnerId: nullable(partner),
+    fromMonth: nullable(month),
+    months: nullable(int(1, 24, relaxed, 'Months in the window')),
+    partnerIds: arrayOf(partner, 'irr_floor only; [] otherwise'),
+    amountMinor: nullable({ type: 'string', description: 'net_profit_target only: minor units as a decimal string, signed' }),
+    basis: nullable({ type: 'string', enum: ['delta', 'absolute'] }),
+  }) as ProposalJsonSchema;
+}

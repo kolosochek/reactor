@@ -1,6 +1,7 @@
 // packages/reactor-service/src/kairon/activities.ts
 //
-// Reactor activities of the forecast prototype (DEV-1364). One chat turn is a
+// Reactor activities of the forecast prototype (DEV-1364; stage 5 adds the
+// router and structuring steps of conversation.ts, DEV-1375). One chat turn is a
 // batch plan of four calls: baseline (explicit) -> proposeVariants (LLM) ->
 // scoreVariants (explicit, Kairon evaluate) -> explainVariants (LLM). A server
 // refusal is returned as the variant's result, never thrown, because batch
@@ -15,8 +16,16 @@ import type { Activity, ActivityContext, LLMCompletionRequest } from '@kolosoche
 import { loadDocument, readBaseline, type Baseline } from './baseline.js';
 import { checkPatch, type PatchRules } from './checks.js';
 import type { KaironApi } from './client.js';
+import { route, RouteInput, StructureGoalInput, structureGoal, StructureScenarioInput, structureScenario } from './conversation.js';
 import { diffVariant, type VariantDiff } from './diff.js';
-import { explainJsonSchema, normalizeStrictAnswer, openMonths, proposalJsonSchema } from './llmSchemas.js';
+import {
+  CUT_OFF_ERROR,
+  explainJsonSchema,
+  normalizeStrictAnswer,
+  openMonths,
+  parseJsonObject,
+  proposalJsonSchema,
+} from './llmSchemas.js';
 import type { KaironLLMRequest } from './openrouter.js';
 import { ForecastPatchSchema, type ForecastDocument } from './patch.js';
 import {
@@ -44,7 +53,6 @@ const MAX_EXPLAIN_ATTEMPTS = 2;
 const PROPOSE_MAX_TOKENS = 32_000;
 /** The structured explanation runs about 1 500 tokens; reasoning models spend more before it. */
 const EXPLAIN_MAX_TOKENS = 8_000;
-const CUT_OFF_ERROR = 'reply: cut off at the token limit (finish_reason length) before the JSON closed';
 const V1_LEVERS_ERROR =
   'the first variant is the scenario alone; leave levers [] and shareTarget null, put levers into the later variants';
 
@@ -68,12 +76,7 @@ const BaselineArg = z.custom<Baseline>(
   'baseline must be the output of kairon.baseline',
 );
 
-export function parseJsonObject(content: string): unknown {
-  const start = content.indexOf('{');
-  const end = content.lastIndexOf('}');
-  if (start === -1 || end <= start) throw new Error('no JSON object in the reply');
-  return JSON.parse(content.slice(start, end + 1));
-}
+export { parseJsonObject } from './llmSchemas.js';
 
 function rulesOf(b: Baseline): PatchRules {
   return { closedThrough: b.closedThrough, derivedLineCodes: b.derivedLineCodes };
@@ -417,6 +420,9 @@ async function explainVariants(raw: unknown, ctx: ActivityContext) {
 
 export type KaironToolName =
   | 'kairon.baseline'
+  | 'kairon.route'
+  | 'kairon.structureScenario'
+  | 'kairon.structureGoal'
   | 'kairon.proposeVariants'
   | 'kairon.scoreVariants'
   | 'kairon.explainVariants';
@@ -424,6 +430,9 @@ export type KaironToolName =
 /** Input JSON schemas of the four tools, shown in the trace and set on the Tool definitions. */
 export const kaironToolInputSchemas: Record<KaironToolName, Record<string, unknown>> = {
   'kairon.baseline': { type: 'object', properties: {}, additionalProperties: true },
+  'kairon.route': zodToJsonSchema(RouteInput) as Record<string, unknown>,
+  'kairon.structureScenario': zodToJsonSchema(StructureScenarioInput) as Record<string, unknown>,
+  'kairon.structureGoal': zodToJsonSchema(StructureGoalInput) as Record<string, unknown>,
   'kairon.proposeVariants': zodToJsonSchema(ProposeInput) as Record<string, unknown>,
   'kairon.scoreVariants': zodToJsonSchema(ScoreInput) as Record<string, unknown>,
   'kairon.explainVariants': zodToJsonSchema(ExplainInput) as Record<string, unknown>,
@@ -436,6 +445,11 @@ export function createKaironActivities(api: KaironApi): Record<KaironToolName, A
     'kairon.baseline': traced('kairon.baseline', 'explicit', async (_input, ctx) =>
       readBaseline(traceKaironApi(api, ctx.onProgress)),
     ),
+    'kairon.route': traced('kairon.route', 'latent', async (input, ctx) => route(input, ctx)),
+    'kairon.structureScenario': traced('kairon.structureScenario', 'latent', async (input, ctx) =>
+      structureScenario(traceKaironApi(api, ctx.onProgress), input, ctx),
+    ),
+    'kairon.structureGoal': traced('kairon.structureGoal', 'latent', async (input, ctx) => structureGoal(input, ctx)),
     'kairon.proposeVariants': traced('kairon.proposeVariants', 'latent', async (input, ctx) =>
       proposeVariants(traceKaironApi(api, ctx.onProgress), input, ctx),
     ),

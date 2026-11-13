@@ -17,6 +17,29 @@ export const kaironForecastTools: Tool[] = [
     type: 'explicit',
   },
   {
+    name: 'kairon.route',
+    inputSchema: kaironToolInputSchemas['kairon.route'] as Tool['inputSchema'],
+    description:
+      'LLM routes a chat message: generate (a new scenario), goal_change (a goal for existing drafts) or question, and the draft ids it is about.',
+    category: 'transformation',
+    type: 'latent',
+  },
+  {
+    name: 'kairon.structureScenario',
+    inputSchema: kaironToolInputSchemas['kairon.structureScenario'] as Tool['inputSchema'],
+    description:
+      'LLM structures the stated scenario into a cost change (lines, month, factor) the server applies outside the lever bounds, or free.',
+    category: 'transformation',
+    type: 'latent',
+  },
+  {
+    name: 'kairon.structureGoal',
+    inputSchema: kaironToolInputSchemas['kairon.structureGoal'] as Tool['inputSchema'],
+    description: 'LLM structures a goal: funding_cover, irr_floor or net_profit_target, with partner and month enums from the baseline.',
+    category: 'transformation',
+    type: 'latent',
+  },
+  {
     name: 'kairon.proposeVariants',
     inputSchema: kaironToolInputSchemas['kairon.proposeVariants'] as Tool['inputSchema'],
     description:

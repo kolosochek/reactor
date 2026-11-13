@@ -143,3 +143,62 @@ export function explainUserPrompt(input: {
     .map(([k, v]) => `${k} = ${v}`)
     .join('\n')}`;
 }
+
+// ---------- stage 5 (DEV-1375): router and structuring steps ----------
+
+export function routeSystemPrompt(): string {
+  return `You route one message of a forecast chat for a real-estate developer's CFO. Return only one JSON object {"kind": ..., "scope": [...]}.
+
+KINDS:
+- generate: the user states a new scenario that changes the forecast: a delay, a cost or price change, a funding change. It opens a new set of variants.
+- goal_change: the user sets or changes a goal for variants that already exist: which partner covers the costs in which months, whose IRR to keep at the promise, a net profit target.
+- question: the user asks about the variants; nothing is recalculated.
+
+SCOPE: the ids of the drafts the message is about. [] means the card the user has selected. ["all"] when the message says all or every variant. A generate message has scope [].`;
+}
+
+export function routeUserPrompt(message: string, drafts: Array<{ id: string; title: string }>, selected: string | null): string {
+  const list = drafts.length === 0 ? 'none yet' : drafts.map((d) => `${d.id}: ${d.title}`).join('\n');
+  return `MESSAGE:\n${message}\n\nDRAFTS:\n${list}\n\nSELECTED CARD: ${selected ?? 'none'}`;
+}
+
+function openLineList(b: Baseline): string {
+  return b.lines
+    .filter((l) => Object.keys(l.openCells).length > 0 && !b.derivedLineCodes.includes(l.code))
+    .map((l) => `${l.code} (group ${l.groupCode ?? '-'}): ${l.name}`)
+    .join('\n');
+}
+
+export function scenarioSystemPrompt(b: Baseline): string {
+  const first = addMonths(b.closedThrough, 1);
+  const construction = b.lines
+    .filter((l) => l.groupCode === 'D' && Object.keys(l.openCells).length > 0)
+    .map((l) => l.code)
+    .join(', ');
+  return `You turn a user's forecast scenario into a structured change for a server. Return only one JSON object; every key is present.
+
+- cost_change: the user states that costs on some plan lines change by a percentage from a month.
+  - lineCodes: the lines the user names. «Стройка» (construction) means the open construction lines: ${construction || 'none'}.
+  - fromMonth: the first month of the change, YYYY-MM. Months up to ${b.closedThrough} are closed; start at ${first} or later. If the user names no month, use ${first}.
+  - factorPpm: 1000000 × (1 + percent / 100). +8 % is 1080000, −5 % is 950000.
+- free: anything else (a delay, a sales change, a funding change). Then lineCodes is [] and fromMonth and factorPpm are null; another step builds the variants.
+
+Never invent a percentage the user did not give.
+
+LINES WITH OPEN CELLS:
+${openLineList(b)}`;
+}
+
+export function goalSystemPrompt(b: Baseline): string {
+  const first = addMonths(b.closedThrough, 1);
+  const partners = (b.partners.length > 0 ? b.partners : b.approved.partners).map((p) => `${p.partnerId}: ${p.name}`).join('\n');
+  const unit = 10 ** b.project.decimals;
+  return `You turn a user's goal for forecast variants into a structured goal for a server. Return only one JSON object; every key is present, and keys the goal type does not use are null or [].
+
+- funding_cover: one partner covers all of the project's cash need for N months. partnerId: the partner. fromMonth: the first month, ${first} or later («ближайшие» means from ${first}). months: N, 1..24.
+- irr_floor: keep the IRR at or above the promise only for the partners named. partnerIds: those partners.
+- net_profit_target: a net profit target. amountMinor: the amount in minor units as a decimal string (1 ${b.project.currencyCode} = ${unit} minor units). basis: "delta" when the user gives a change or a bare signed number such as «+10 000 000» (against the variant's current net profit); "absolute" when the user names the profit level itself («прибыль 400 млн»).
+
+PARTNERS:
+${partners}`;
+}
