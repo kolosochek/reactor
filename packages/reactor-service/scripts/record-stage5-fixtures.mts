@@ -67,6 +67,7 @@ const active = (await evaluate(b.forecastVersion.id, {})) as {
 };
 write('eval-active.json', active);
 write('eval-approved.json', await evaluate(b.approvedVersion.id, {}));
+write('approved-plan.json', b.approvedPlan);
 
 const from = addMonths(b.closedThrough, 1);
 const construction = { lineCodes: ['D5', 'D8'], fromMonth: from, factorPpm: 1_080_000 };

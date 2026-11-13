@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HttpResult, KaironApi, KaironVersion } from '../../kairon/client.js';
-import type { ForecastDocument } from '../../kairon/patch.js';
+import type { ForecastDocument, ForecastPlan } from '../../kairon/patch.js';
 
 export const KAIRON_FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'kairon');
 
@@ -17,8 +17,8 @@ export function readFixture(path: string): unknown {
 
 export const fixtureDoc = readFixture('forecast-document.active.json') as ForecastDocument;
 
-function version(id: string, name: string, role: string, isActive: boolean): KaironVersion {
-  return { id, name, role, isActive, payload: { lines: fixtureDoc.plan.lines, monthRange: fixtureDoc.plan.monthRange } };
+function version(id: string, name: string, role: string, isActive: boolean, plan: ForecastPlan): KaironVersion {
+  return { id, name, role, isActive, payload: { lines: plan.lines, monthRange: plan.monthRange } };
 }
 
 export function readStage5(name: string): unknown {
@@ -28,6 +28,9 @@ export function readStage5(name: string): unknown {
 const STAGE5_PROJECT = readStage5('project.json') as {
   settings: { funding: { partners: Array<{ id: string; name: string; sharePct: number }> } };
 };
+
+/** The approved version's plan (stage 5 recording); the stage 4 fake served the active plan for it. */
+const APPROVED_PLAN = readStage5('approved-plan.json') as ForecastPlan;
 
 /** Rivergate's partners and their agreed shares, as settings.funding.partners serves them. */
 export const RIVERGATE_PARTNERS = STAGE5_PROJECT.settings.funding.partners.map((p) => ({
@@ -51,8 +54,8 @@ export function fakeKaironApi(
     pinnedVersionId: 'solstice-forecast-3',
     getProject: async () => (options.partners === true ? { ...project, settings: STAGE5_PROJECT.settings } : project),
     listVersions: async () => [
-      version('solstice-forecast-3', 'Forecast v3', 'forecast', true),
-      version('d942a201-5349-46fd-9043-b697288460fe', 'Approved budget', 'approved', false),
+      version('solstice-forecast-3', 'Forecast v3', 'forecast', true, fixtureDoc.plan),
+      version('d942a201-5349-46fd-9043-b697288460fe', 'Approved budget', 'approved', false, APPROVED_PLAN),
     ],
     getMilestones: async () => [
       { code: 'OCCUPANCY_PERMIT', name: 'Occupancy Permit', dueDate: '2027-12-30', completedAt: null },
