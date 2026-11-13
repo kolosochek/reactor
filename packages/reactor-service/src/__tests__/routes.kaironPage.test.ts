@@ -24,4 +24,18 @@ describe('GET /kairon', () => {
 
     await app.close();
   });
+
+  it('serves the card renderer module next to the page', async () => {
+    // SCENARIO: DEV-1376, the page imports its renderers as an ES module from the service origin
+    // INPUT: GET /kairon/assets/kairon-render.mjs
+    // EXPECTED: status 200, text/javascript, the module exports renderVerdict
+    const app = await buildServer({ repositories: stubRepos, logLevel: 'warn' });
+
+    const res = await app.inject({ method: 'GET', url: '/kairon/assets/kairon-render.mjs' });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/javascript; charset=utf-8');
+    expect(res.body).toContain('export function renderVerdict(');
+
+    await app.close();
+  });
 });
