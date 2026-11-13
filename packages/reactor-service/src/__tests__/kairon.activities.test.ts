@@ -245,6 +245,113 @@ describe('kairon.buildGoalDrafts', () => {
   });
 });
 
+describe('kairon.scoreVariants against parents (stage 5)', () => {
+  const HASH = planHash(fixtureDoc);
+  const CONSTRUCTION = { type: 'cost_change' as const, lineCodes: ['D5', 'D8'], fromMonth: '2026-09', factorPpm: 1_080_000 };
+  const releaseU2 = ['2026-11', '2027-06', '2028-01', '2028-06'].map((month) => ({ code: 'U2', month, amountMinor: '0' }));
+  const r1 = (factorPpm: number) => ({ lineCodes: ['R1'], fromMonth: '2026-09', factorPpm });
+  const lineage = (over: Partial<DraftLineage>): DraftLineage => ({ activePlanHash: HASH, scenario: { type: 'free' }, leverPatch: null, steps: [], ...over });
+  const draft = (id: string, levers: string[], l: DraftLineage, parentId: string | null = null) => ({ id, parentId, title: id, rationale: '', levers, lineage: l });
+  const S2 = [
+    draft('v1', [], lineage({ scenario: CONSTRUCTION })),
+    draft('v2', ['резерв'], lineage({ scenario: CONSTRUCTION, leverPatch: { name: 'v2', set: releaseU2 } })),
+    draft('v3', ['цены'], lineage({ scenario: CONSTRUCTION, leverPatch: { name: 'v3', scale: [r1(1_030_000)] } })),
+    draft('v4', ['резерв', 'цены'], lineage({ scenario: CONSTRUCTION, leverPatch: { name: 'v4', scale: [r1(1_023_000)], set: releaseU2 } })),
+  ];
+  const COVER_GOAL = { type: 'funding_cover' as const, partnerId: 'cedar', fromMonth: '2026-09', months: 6 };
+
+  async function score(input: Record<string, unknown>) {
+    const api = fakeApi(stage5Evaluate, { partners: true });
+    const activities = createKaironActivities(api);
+    const b = (await activities['kairon.baseline']({}, ctxWith(scriptedLlm([])))) as Baseline;
+    return (await activities['kairon.scoreVariants']({ baseline: b, ...input }, ctxWith(scriptedLlm([])))) as {
+      variants: Array<{
+        id: string;
+        status: string;
+        redLines: Array<{ key: string; status: string; baseStatus: string }>;
+        goalChecks: Array<{ draft: string; months: Array<{ draft: boolean }> }>;
+      }>;
+      ranking: string[];
+      dropped: Array<{ id: string; sameAs: string }>;
+      switches: Array<{ label: string; winner: string }>;
+      rules: string[];
+      answers: Array<{ parentId: string; text: string }>;
+      facts: Record<string, string>;
+    };
+  }
+
+  it('ranks construction +8 % with red lines, switches and the new facts', async () => {
+    // SCENARIO: spec 5.7; the four S2 drafts against the active forecast
+    // INPUT: lineages v1..v4; evaluate serves the recorded S2 bodies
+    // EXPECTED: ranking v1..v4; v1's red lines as in redLines; switches v4, v4, v3; the promise rules; partners put in +44,6 млн for v1
+    const out = await score({ proposals: { variants: S2 }, parents: [], goals: [] });
+    expect(out.ranking).toEqual(['v1', 'v2', 'v3', 'v4']);
+    expect(out.variants[0]?.redLines.map((l) => [l.key, l.status, l.baseStatus])).toEqual([
+      ['cashGap', 'ok', 'ok'],
+      ['frame.solstice', 'breach', 'breach'],
+      ['frame.cedar', 'breach', 'breach'],
+      ['parity', 'ok', 'ok'],
+      ['irr', 'ok', 'ok'],
+      ['ltc', 'unchecked', 'unchecked'],
+      ['ltv', 'unchecked', 'unchecked'],
+    ]);
+    expect(out.switches).toEqual([
+      { label: 'Важна прибыль как в плане', winner: 'v4' },
+      { label: 'Меньше денег партнёров', winner: 'v4' },
+      { label: 'Прибыль без траты резерва', winner: 'v3' },
+    ]);
+    expect(out.rules).toEqual([
+      'Красные линии отсекают варианты: отсекает только нарушение, которое добавил сам вариант.',
+      'Цель запроса не названа, поэтому цель по умолчанию: IRR каждого партнёра не ниже обещания и как можно ближе к нему.',
+      'При равенстве выигрывает вариант с меньшим числом рычагов.',
+    ]);
+    expect([out.facts['v1.d.alloc'], out.facts['v1.d.alloc.solstice'], out.facts['v1.d.alloc.cedar']]).toEqual([
+      '+44,6 млн CZK',
+      '+13,4 млн CZK',
+      '+31,2 млн CZK',
+    ]);
+  });
+
+  it('drops the bank variant that changes nothing', async () => {
+    // SCENARIO: «перерасход берёт банк», equity share 60 %
+    // INPUT: S2 plus v5 = construction +8 % with shareTarget 6000
+    // EXPECTED: dropped [{v5 same as v1}]; v5 is not ranked
+    const v5 = draft('v5', ['банк'], lineage({ scenario: CONSTRUCTION, leverPatch: { name: 'v5', shareTarget: { equityShareBp: 6000 } } }));
+    const out = await score({ proposals: { variants: [...S2, v5] }, parents: [], goals: [] });
+    expect(out.dropped).toEqual([{ id: 'v5', sameAs: 'v1' }]);
+    expect(out.ranking).toEqual(['v1', 'v2', 'v3', 'v4']);
+  });
+
+  it('warns on parity and meets the cover goal for v2.1', async () => {
+    // SCENARIO: Cedar covers the need for six months on top of the active forecast
+    // INPUT: parent v2 = the active forecast unchanged; child v2.1 adds the recorded cover draws
+    // EXPECTED: parity warn on v2.1; its goal check is ok in 6 of 6 months
+    const draws = (readJson('stage5/cover-cedar.body.json') as { draws: unknown[] }).draws;
+    const child = draft('v2.1', [], lineage({ steps: [{ type: 'cover', goal: COVER_GOAL, draws } as DraftLineage['steps'][number]] }), 'v2');
+    const out = await score({ proposals: { variants: [child] }, parents: [{ id: 'v2', lineage: lineage({}) }], goals: [COVER_GOAL] });
+    const v21 = out.variants[0];
+    expect(v21?.redLines.find((l) => l.key === 'parity')?.status).toBe('warn');
+    expect(v21?.goalChecks[0]?.draft).toBe('ok');
+    expect(v21?.goalChecks[0]?.months.filter((m) => m.draft)).toHaveLength(6);
+  });
+
+  it('answers that a goal is out of reach within the lever bounds', async () => {
+    // SCENARIO: Review Focus 1, «+100 млн чистой прибыли» on S2 v1; the best lever R1 × 1.03 reaches 384,5 млн
+    // INPUT: child v1.1 = v1 + R1 × 1 030 000 with a net_profit_target delta of 10 000 000 000 minor
+    // EXPECTED: the goal check is breach; the answer names v1.1 as the closest draft
+    const goal = { type: 'net_profit_target' as const, amountMinor: '10000000000', basis: 'delta' as const };
+    const child = draft(
+      'v1.1',
+      ['цены'],
+      lineage({ scenario: CONSTRUCTION, steps: [{ type: 'levers', goal, patch: { name: 'v1.1', scale: [r1(1_030_000)] } }] }),
+      'v1',
+    );
+    const out = await score({ proposals: { variants: [child], answers: [] }, parents: [{ id: 'v1', lineage: S2[0]?.lineage }], goals: [goal] });
+    expect(out.variants[0]?.goalChecks[0]?.draft).toBe('breach');
+    expect(out.answers).toEqual([{ parentId: 'v1', text: 'Цель недостижима рычагами в пределах ±3 %: ближе всего v1.1' }]);
+  });
+});
+
 describe('kairon.scoreVariants', () => {
   it('scores accepted variants, records a server refusal as data and ranks them', async () => {
     // SCENARIO: two proposals; the server accepts v1 and refuses v2 with 422

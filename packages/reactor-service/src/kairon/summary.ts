@@ -246,13 +246,15 @@ export function diffFacts(
   active: EvaluationMetrics,
   variant: EvaluationMetrics,
   diff: VariantDiff,
+  /** The fact row of the diff's base side: 'active', or the parent draft's id for a child (stage 5). */
+  baseKey = 'active',
 ): Record<string, string> {
   const facts: Record<string, string> = {};
   const money = (minor: string) => formatMillions(minor, currency.decimals, currency.currencyCode);
   facts[`${id}.d.netProfit`] = signedMillions(BigInt(diff.profit.variantNetMinor) - BigInt(diff.profit.activeNetMinor), currency);
   if (diff.profit.variantExitMinor !== null && diff.profit.activeExitMinor !== null) {
     facts[`${id}.exitProfit`] = money(diff.profit.variantExitMinor);
-    facts['active.exitProfit'] = money(diff.profit.activeExitMinor);
+    facts[`${baseKey}.exitProfit`] = money(diff.profit.activeExitMinor);
     facts[`${id}.d.exitProfit`] = signedMillions(BigInt(diff.profit.variantExitMinor) - BigInt(diff.profit.activeExitMinor), currency);
   }
   for (const p of variant.partners) {
@@ -261,7 +263,7 @@ export function diffFacts(
   }
   const sides = [
     { key: id, low: diff.cash.variantTrough, positive: diff.cash.variantPositive },
-    { key: 'active', low: diff.cash.activeTrough, positive: diff.cash.activePositive },
+    { key: baseKey, low: diff.cash.activeTrough, positive: diff.cash.activePositive },
   ];
   for (const { key, low, positive } of sides) {
     if (low !== null) {
@@ -272,6 +274,34 @@ export function diffFacts(
   }
   for (const row of diff.bridge) {
     if (BigInt(row.minor) !== 0n) facts[`${id}.bridge.${row.key}`] = signedMillions(BigInt(row.minor), currency);
+  }
+  return facts;
+}
+
+/**
+ * Stage 5 facts of a draft against its parent (DEV-1375): what each partner and
+ * all partners put in more or less (partnerFrames allocations), and the net
+ * profit change as a share of the parent's net profit.
+ */
+export function allocationFacts(
+  currency: CurrencyFormat,
+  id: string,
+  parent: EvaluationMetrics,
+  variant: EvaluationMetrics,
+): Record<string, string> {
+  const facts: Record<string, string> = {};
+  let total = 0n;
+  for (const [partnerId, minor] of Object.entries(variant.partnerAllocatedMinor)) {
+    const delta = BigInt(minor) - BigInt(parent.partnerAllocatedMinor[partnerId] ?? '0');
+    total += delta;
+    facts[`${id}.d.alloc.${partnerId}`] = signedMillions(delta, currency);
+  }
+  facts[`${id}.d.alloc`] = signedMillions(total, currency);
+  const base = BigInt(parent.netProfitMinor);
+  if (base !== 0n) {
+    const change = BigInt(variant.netProfitMinor) - base;
+    const abs = (v: bigint) => (v < 0n ? -v : v);
+    facts[`${id}.d.netProfitShare`] = `${RU(1).format(Number((abs(change) * 10_000n) / abs(base)) / 100)} %`;
   }
   return facts;
 }

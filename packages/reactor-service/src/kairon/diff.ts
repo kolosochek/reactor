@@ -57,6 +57,9 @@ const BRIDGE: Array<{ key: BridgeKey; label: string }> = [
   { key: 'other', label: 'Прочее' },
 ];
 
+/** Plan line groups that hold revenue (R sales, C other income); every other group is a cost. */
+export const REVENUE_GROUP_CODES = ['R', 'C'];
+
 /** Kairon's income tax line; typed on projects without derived lines. */
 export const TAX_LINE_CODE = 'F7';
 

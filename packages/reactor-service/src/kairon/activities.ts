@@ -14,10 +14,11 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { Activity, ActivityContext, LLMCompletionRequest } from '@kolosochek/reactor-core';
 import { digestLines, loadDocument, readBaseline, type Baseline } from './baseline.js';
-import { checkPatch, type PatchRules } from './checks.js';
+import { checkPatch, patchLineCodes, type PatchRules } from './checks.js';
 import type { KaironApi } from './client.js';
 import { route, RouteInput, StructureGoalInput, structureGoal, StructureScenarioInput, structureScenario } from './conversation.js';
-import { diffVariant, type VariantDiff } from './diff.js';
+import { diffVariant, REVENUE_GROUP_CODES, type VariantDiff } from './diff.js';
+import { forecastDiffView, type DiffView } from './diffView.js';
 import {
   CUT_OFF_ERROR,
   explainJsonSchema,
@@ -27,9 +28,22 @@ import {
   proposalJsonSchema,
 } from './llmSchemas.js';
 import type { KaironLLMRequest } from './openrouter.js';
-import { checkGoals, fundingCoverDraws, goalLabel, GoalSchema, type Goal } from './goals.js';
+import {
+  checkGoals,
+  fundingCoverDraws,
+  goalLabel,
+  GoalSchema,
+  rankGoalOf,
+  type Goal,
+  type GoalCheck,
+  type RankGoal,
+} from './goals.js';
 import { childId, DraftLineageSchema, planHash, replayLineage, type DraftLineage } from './lineage.js';
-import { ForecastPatchSchema, type ForecastDocument } from './patch.js';
+import { applyPatch, ForecastPatchSchema, type EvaluateBody, type ForecastDocument } from './patch.js';
+import { criteriaMatrix, rankDrafts, sameAsEarlier, switchesFor, type DraftScore } from './ranking.js';
+import { reconcile, type Reconciliation } from './reconcile.js';
+import { redLines, type RedLine } from './redLines.js';
+import { changedPaths, type PathChange } from './widgets.js';
 import { applyScenario, ScenarioSpecSchema, type ScenarioSpec } from './scenario.js';
 import {
   explainSystemPrompt,
@@ -39,10 +53,11 @@ import {
   type LeverMode,
 } from './prompts.js';
 import {
+  allocationFacts,
   buildFacts,
   diffFacts,
+  formatMillions,
   literalNumbers,
-  rankVariants,
   renderPlaceholders,
   summarizeEvaluation,
   type EvaluationMetrics,
@@ -389,9 +404,25 @@ async function buildGoalDrafts(api: KaironApi, raw: unknown, ctx: ActivityContex
   return { variants, answers, rejected, attempts, model };
 }
 
+const ScoredDraftArg = z.object({
+  id: z.string().min(1),
+  parentId: z.string().nullable().default(null),
+  title: z.string().min(1),
+  rationale: z.string().default(''),
+  levers: z.array(z.string()).default([]),
+  /** Stage 4 proposals carry only the patch; their lineage is the patch on the active forecast. */
+  patch: ForecastPatchSchema.omit({ name: true }).default({}),
+  lineage: DraftLineageSchema.optional(),
+});
+
 const ScoreInput = z.object({
   baseline: BaselineArg,
-  proposals: z.object({ variants: z.array(VariantSchema) }),
+  proposals: z.object({
+    variants: z.array(ScoredDraftArg),
+    answers: z.array(z.object({ parentId: z.string(), text: z.string() })).default([]),
+  }),
+  parents: z.array(z.object({ id: z.string().min(1), lineage: DraftLineageSchema })).default([]),
+  goals: z.array(GoalSchema).default([]),
 });
 
 function refusalMessage(json: unknown): string {
@@ -405,86 +436,266 @@ function refusalMessage(json: unknown): string {
 
 export interface ScoredVariant {
   id: string;
+  parentId: string | null;
   title: string;
   rationale: string;
   levers: string[];
   patch: Variant['patch'];
+  lineage: DraftLineage;
   status: 'ok' | 'refused' | 'invalid';
   httpStatus: number | null;
   errors: string[];
   adjustments: string[];
   metrics: EvaluationMetrics | null;
-  /** What the variant changes against the active forecast; null unless Kairon scored it. */
+  /** What the variant changes against its parent; null unless Kairon scored it. */
   diff: VariantDiff | null;
+  redLines: RedLine[];
+  reconciliations: Reconciliation[];
+  goalChecks: GoalCheck[];
+  changed: PathChange[];
+  diffView: DiffView | null;
+  /** Server-side scoring inputs the ranking reads. */
+  touchesReserve: boolean;
+  reserveLeftMinor: string;
 }
 
-async function scoreOne(
-  api: KaironApi,
-  b: Baseline,
-  doc: ForecastDocument,
-  activeEval: unknown,
-  v: Variant,
-): Promise<ScoredVariant> {
-  const base = { id: v.id, title: v.title, rationale: v.rationale, levers: v.levers, patch: v.patch, diff: null };
-  const check = checkPatch(doc, rulesOf(b), { ...v.patch, name: v.id });
-  if (check.body === null) {
-    return { ...base, status: 'invalid', httpStatus: null, errors: check.errors, adjustments: [], metrics: null };
-  }
-  const res = await api.evaluate(b.forecastVersion.id, check.body);
-  if (res.status !== 200) {
-    return {
-      ...base,
-      status: 'refused',
-      httpStatus: res.status,
-      errors: [refusalMessage(res.json)],
-      adjustments: check.adjustments,
-      metrics: null,
-    };
-  }
-  return {
-    ...base,
-    status: 'ok',
-    httpStatus: 200,
-    errors: [],
-    adjustments: check.adjustments,
-    metrics: summarizeEvaluation(res.json),
-    diff: diffVariant({
-      currency: currencyOf(b),
-      closedThrough: b.closedThrough,
-      derivedLineCodes: b.derivedLineCodes,
-      activePlan: doc.plan,
-      variantPlan: check.body.plan,
-      activeEval,
-      variantEval: res.json,
-    }),
-  };
+/** A draft's parent as the scoring compares against it: the active forecast or a replayed parent draft. */
+interface ParentSide {
+  key: string;
+  body: EvaluateBody;
+  eval: unknown;
+  metrics: EvaluationMetrics;
 }
 
 function currencyOf(b: Baseline) {
   return { decimals: b.project.decimals, currencyCode: b.project.currencyCode };
 }
 
+const RESERVE_GROUP = 'U';
+
+function reserveOf(body: EvaluateBody, active: ForecastDocument, closedThrough: string): { touches: boolean; leftMinor: string } {
+  const before = new Map(active.plan.lines.map((l) => [l.code, l.monthlyForecast]));
+  let touches = false;
+  let left = 0n;
+  for (const line of body.plan.lines) {
+    if (line.groupCode !== RESERVE_GROUP) continue;
+    const old = before.get(line.code) ?? {};
+    const months = new Set([...Object.keys(old), ...Object.keys(line.monthlyForecast)]);
+    for (const m of months) if (BigInt(old[m] ?? '0') !== BigInt(line.monthlyForecast[m] ?? '0')) touches = true;
+    for (const [m, v] of Object.entries(line.monthlyForecast)) {
+      if (m > closedThrough) left += BigInt(v) < 0n ? -BigInt(v) : BigInt(v);
+    }
+  }
+  return { touches, leftMinor: String(left) };
+}
+
+/** What the request named for this draft: the scenario's and levers' lines, the cover's sources. */
+function askedOf(lineage: DraftLineage, isChild: boolean): { lines: string[]; sources: string[] } {
+  const last = lineage.steps.at(-1);
+  if (isChild && last !== undefined) {
+    return last.type === 'cover'
+      ? { lines: [], sources: [...new Set(last.draws.map((d) => d.sourceId))] }
+      : { lines: patchLineCodes(last.patch), sources: [] };
+  }
+  const scenarioLines = lineage.scenario.type === 'cost_change' ? lineage.scenario.lineCodes : [];
+  const leverLines = lineage.leverPatch === null ? [] : patchLineCodes(lineage.leverPatch);
+  return { lines: [...new Set([...scenarioLines, ...leverLines])], sources: [] };
+}
+
+const RULE_RED_LINES = 'Красные линии отсекают варианты: отсекает только нарушение, которое добавил сам вариант.';
+const RULE_LEVERS = 'При равенстве выигрывает вариант с меньшим числом рычагов.';
+const UNREACHABLE = 'Цель недостижима рычагами в пределах ±3 %: ближе всего';
+
+function goalRule(goal: RankGoal, b: Baseline): string {
+  if (goal.type === 'net_profit_target') {
+    return `Чистая прибыль не ниже ${formatMillions(goal.targetMinor, b.project.decimals, b.project.currencyCode)} и как можно ближе к ней.`;
+  }
+  if (goal.type === 'promise' && goal.partnerIds !== null) {
+    const names = goal.partnerIds.map((id) => partnersOf(b).find((p) => p.partnerId === id)?.name ?? id);
+    return `IRR не ниже обещания только для: ${names.join(', ')}.`;
+  }
+  return 'Цель запроса не названа, поэтому цель по умолчанию: IRR каждого партнёра не ниже обещания и как можно ближе к нему.';
+}
+
 async function scoreVariants(api: KaironApi, raw: unknown) {
   const input = ScoreInput.parse(raw);
   const b = input.baseline;
+  const currency = currencyOf(b);
+  const rules = rulesOf(b);
   const doc = await loadDocument(api, b.forecastVersion.id);
+  const activePlanHash = planHash(doc);
   const activeRes = await api.evaluate(b.forecastVersion.id, {});
   if (activeRes.status !== 200) throw new Error(`Active forecast evaluate failed: ${activeRes.status}`);
-  const variants = await Promise.all(input.proposals.variants.map((v) => scoreOne(api, b, doc, activeRes.json, v)));
-  const ranking = rankVariants(
-    b.approved.partners,
-    variants.map((v) => ({ id: v.id, metrics: v.metrics })),
-  );
+  const activeSide: ParentSide = {
+    key: 'active',
+    body: applyPatch(doc, { name: 'active' }),
+    eval: activeRes.json,
+    metrics: summarizeEvaluation(activeRes.json),
+  };
+  const parents = new Map<string, ParentSide>();
+  for (const parent of input.parents) {
+    const replay = replayLineage(doc, rules, parent.lineage);
+    if (replay.body === null) continue;
+    const res = await api.evaluate(b.forecastVersion.id, replay.body);
+    if (res.status === 200) parents.set(parent.id, { key: parent.id, body: replay.body, eval: res.json, metrics: summarizeEvaluation(res.json) });
+  }
+  const irrPartnerIds = input.goals.filter((g) => g.type === 'irr_floor').at(-1)?.partnerIds ?? null;
+
+  const scoreOne = async (v: z.infer<typeof ScoredDraftArg>): Promise<ScoredVariant> => {
+    const lineage: DraftLineage = v.lineage ?? {
+      activePlanHash,
+      scenario: { type: 'free' },
+      leverPatch: { ...v.patch, name: v.id },
+      steps: [],
+    };
+    const base = {
+      id: v.id,
+      parentId: v.parentId,
+      title: v.title,
+      rationale: v.rationale,
+      levers: v.levers,
+      patch: v.patch,
+      lineage,
+      diff: null,
+      redLines: [],
+      reconciliations: [],
+      goalChecks: [],
+      changed: [],
+      diffView: null,
+      touchesReserve: false,
+      reserveLeftMinor: '0',
+    };
+    const parent = v.parentId === null ? activeSide : parents.get(v.parentId);
+    if (parent === undefined) {
+      return { ...base, status: 'invalid', httpStatus: null, errors: [`parent ${v.parentId ?? ''} could not be scored`], adjustments: [], metrics: null };
+    }
+    const replay = replayLineage(doc, rules, lineage);
+    if (replay.body === null) {
+      return { ...base, status: 'invalid', httpStatus: null, errors: replay.errors, adjustments: [], metrics: null };
+    }
+    const body = replay.body;
+    const adjustments = lineage.leverPatch === null ? [] : checkPatch(applyScenario(doc, rules, lineage.scenario).doc, rules, lineage.leverPatch).adjustments;
+    const res = await api.evaluate(b.forecastVersion.id, body);
+    if (res.status !== 200) {
+      return { ...base, status: 'refused', httpStatus: res.status, errors: [refusalMessage(res.json)], adjustments, metrics: null };
+    }
+    const diff = diffVariant({
+      currency,
+      closedThrough: b.closedThrough,
+      derivedLineCodes: b.derivedLineCodes,
+      activePlan: parent.body.plan,
+      variantPlan: body.plan,
+      activeEval: parent.eval,
+      variantEval: res.json,
+    });
+    const asked = askedOf(lineage, v.parentId !== null);
+    const reserve = reserveOf(body, doc, b.closedThrough);
+    return {
+      ...base,
+      status: 'ok',
+      httpStatus: 200,
+      errors: [],
+      adjustments,
+      metrics: summarizeEvaluation(res.json),
+      diff,
+      redLines: redLines({ approved: b.approved, partners: b.partners, irrPartnerIds, parentEval: parent.eval, draftEval: res.json, currency }),
+      reconciliations: reconcile({
+        parentBody: parent.body,
+        draftBody: body,
+        draftEval: res.json,
+        diff,
+        askedLineCodes: asked.lines,
+        askedDrawSourceIds: asked.sources,
+        currency,
+      }),
+      goalChecks: checkGoals(input.goals, {
+        approved: b.approved,
+        parentEval: parent.eval,
+        draftEval: res.json,
+        parentNetProfitMinor: parent.metrics.netProfitMinor,
+        currency,
+      }),
+      changed: changedPaths({ parentBody: parent.body, draftBody: body, parentEval: parent.eval, draftEval: res.json, diff }),
+      diffView: forecastDiffView({
+        parentPlan: parent.body.plan,
+        draftPlan: body.plan,
+        approvedPlan: b.approvedPlan,
+        parentEval: parent.eval,
+        draftEval: res.json,
+        diff,
+        revenueGroups: REVENUE_GROUP_CODES,
+      }),
+      touchesReserve: reserve.touches,
+      reserveLeftMinor: reserve.leftMinor,
+    };
+  };
+
+  const variants = await Promise.all(input.proposals.variants.map(scoreOne));
+  const parentOf = (v: ScoredVariant) => (v.parentId === null ? activeSide : parents.get(v.parentId) ?? activeSide);
+  const okVariants = variants.filter((v): v is ScoredVariant & { metrics: EvaluationMetrics } => v.metrics !== null);
+
+  const dropped: Array<{ id: string; sameAs: string }> = [];
+  for (const parentKey of new Set(okVariants.map((v) => v.parentId))) {
+    const group = okVariants.filter((v) => v.parentId === parentKey);
+    const first = group[0];
+    if (first === undefined) continue;
+    dropped.push(...sameAsEarlier(group.map((v) => ({ id: v.id, metrics: v.metrics })), parentOf(first).metrics));
+  }
+  const droppedIds = new Set(dropped.map((d) => d.id));
+  const scores: DraftScore[] = okVariants
+    .filter((v) => !droppedIds.has(v.id))
+    .map((v) => ({
+      id: v.id,
+      metrics: v.metrics,
+      parentMetrics: parentOf(v).metrics,
+      leverCount: v.levers.length,
+      touchesReserve: v.touchesReserve,
+      reserveLeftMinor: v.reserveLeftMinor,
+      addedBreaches: v.redLines.filter((l) => l.status === 'breach' && l.baseStatus !== 'breach').length,
+      goalsMet: v.goalChecks.every((c) => c.draft === 'ok'),
+    }));
+  const firstParent = input.parents[0];
+  const rankBase = (firstParent === undefined ? undefined : parents.get(firstParent.id)) ?? activeSide;
+  const rankGoal = rankGoalOf(input.goals, rankBase.metrics.netProfitMinor);
+  const ranked = rankDrafts(scores, b.approved, rankGoal);
+  const ranking = [...ranked.ranking, ...variants.filter((v) => v.metrics === null).map((v) => v.id)];
+  const redLinesById = Object.fromEntries(okVariants.map((v) => [v.id, v.redLines]));
+
+  const answers = [...input.proposals.answers];
+  for (const v of okVariants) {
+    const last = v.lineage.steps.at(-1);
+    if (v.parentId === null || last === undefined || last.type !== 'levers') continue;
+    const check = v.goalChecks.find((c) => c.goal === last.goal || JSON.stringify(c.goal) === JSON.stringify(last.goal));
+    if (check !== undefined && check.draft !== 'ok') answers.push({ parentId: v.parentId, text: `${UNREACHABLE} ${v.id}` });
+  }
+
   const rows = [
     { key: 'approved', metrics: b.approved },
     { key: 'active', metrics: b.active },
-    ...variants.flatMap((v) => (v.metrics === null ? [] : [{ key: v.id, metrics: v.metrics }])),
+    ...[...parents.values()].map((p) => ({ key: p.key, metrics: p.metrics })),
+    ...okVariants.map((v) => ({ key: v.id, metrics: v.metrics })),
   ];
-  const facts = buildFacts(currencyOf(b), b.approved, rows);
-  for (const v of variants) {
-    if (v.metrics !== null && v.diff !== null) Object.assign(facts, diffFacts(currencyOf(b), v.id, b.active, v.metrics, v.diff));
+  const facts = buildFacts(currency, b.approved, rows);
+  for (const v of okVariants) {
+    const parent = parentOf(v);
+    if (v.diff !== null) Object.assign(facts, diffFacts(currency, v.id, parent.metrics, v.metrics, v.diff, parent.key));
+    Object.assign(facts, allocationFacts(currency, v.id, parent.metrics, v.metrics));
+    const parity = v.redLines.find((l) => l.key === 'parity');
+    if (parity !== undefined) facts[`${v.id}.parity`] = parity.text;
   }
-  return { variants, ranking, facts, approved: b.approved, active: b.active };
+  return {
+    variants,
+    ranking,
+    notRecommendable: ranked.notRecommendable,
+    dropped,
+    switches: switchesFor(scores, b.approved),
+    matrix: criteriaMatrix(scores, b.approved, redLinesById, currency, rankGoal),
+    rules: [RULE_RED_LINES, goalRule(rankGoal, b), RULE_LEVERS],
+    answers,
+    facts,
+    approved: b.approved,
+    active: b.active,
+  };
 }
 
 const ExplainInput = z.object({

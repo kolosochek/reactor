@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HttpResult, KaironApi, KaironVersion } from '../../kairon/client.js';
 import { canonicalJson } from '../../kairon/lineage.js';
-import type { ForecastDocument, ForecastPlan } from '../../kairon/patch.js';
+import { applyPatch, type ForecastDocument, type ForecastPlan } from '../../kairon/patch.js';
 
 export const KAIRON_FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'kairon');
 
@@ -78,6 +78,8 @@ let stage5Bodies: Map<string, string> | null = null;
 function recordedStage5Bodies(): Map<string, string> {
   if (stage5Bodies === null) {
     stage5Bodies = new Map(STAGE5_BODIES.map((name) => [canonicalJson(readStage5(`${name}.body.json`)), `${name}.eval.json`]));
+    // A draft with no change (the active forecast as a parent) replays to the plan alone: Kairon scores it as {}.
+    stage5Bodies.set(canonicalJson(applyPatch(fixtureDoc, { name: 'active' })), 'eval-active.json');
   }
   return stage5Bodies;
 }
