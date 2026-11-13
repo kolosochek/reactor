@@ -143,6 +143,22 @@ describe('kairon.structureGoal', () => {
     expect(out).toEqual({ goal: { type: 'net_profit_target', amountMinor: '1000000000', basis: 'delta' }, errors: [] });
   });
 
+  it('keeps a cover window the user starts in a closed month, so the server refuses it with the month', async () => {
+    // SCENARIO: Review Focus 4, «Cedar покрывает 6 месяцев с июля 2026» while months through 2026-08 are closed
+    // INPUT: reply funding_cover cedar 2026-07 × 6
+    // EXPECTED: the goal comes back with 2026-07 after 1 call (buildGoalDrafts refuses it); the month enum runs from the plan start
+    const b = await baseline();
+    const llm = scriptedLlm([
+      '{"type":"funding_cover","partnerId":"cedar","fromMonth":"2026-07","months":6,"partnerIds":[],"amountMinor":null,"basis":null}',
+    ]);
+    const out = await activities['kairon.structureGoal']({ message: 'Cedar покрывает 6 месяцев с июля 2026', baseline: b, scope: ['v2'] }, ctxWith(llm));
+    expect(out).toEqual({ goal: { type: 'funding_cover', partnerId: 'cedar', fromMonth: '2026-07', months: 6 }, errors: [] });
+    expect(llm.complete).toHaveBeenCalledTimes(1);
+    const schema = requestOf(llm, 0).responseSchema?.schema as { properties: { fromMonth: { anyOf: Array<{ enum?: string[] }> } } };
+    const months = schema.properties.fromMonth.anyOf[0]?.enum ?? [];
+    expect([months[0], months.includes('2026-07'), months.at(-1)]).toEqual([b.monthRange.from, true, b.monthRange.to]);
+  });
+
   it('returns the errors after one failed retry', async () => {
     // SCENARIO: the model twice answers a cover goal without a partner
     // INPUT: two replies with partnerId null

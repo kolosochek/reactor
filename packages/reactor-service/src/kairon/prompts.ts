@@ -245,7 +245,7 @@ export function goalSystemPrompt(b: Baseline): string {
   const unit = 10 ** b.project.decimals;
   return `You turn a user's goal for forecast variants into a structured goal for a server. Return only one JSON object; every key is present, and keys the goal type does not use are null or [].
 
-- funding_cover: one partner covers all of the project's cash need for N months. partnerId: the partner. fromMonth: the first month, ${first} or later («ближайшие» means from ${first}). months: N, 1..24.
+- funding_cover: one partner covers all of the project's cash need for N months. partnerId: the partner. fromMonth: the first month the user names, as named: months up to ${b.closedThrough} are closed and the server refuses them, naming the month; with no month or «ближайшие», ${first}. months: N, 1..24.
 - irr_floor: keep the IRR at or above the promise only for the partners named. partnerIds: those partners.
 - net_profit_target: a net profit target. amountMinor: the amount in minor units as a decimal string (1 ${b.project.currencyCode} = ${unit} minor units). basis: "delta" when the user gives a change or a bare signed number such as «+10 000 000» (against the variant's current net profit); "absolute" when the user names the profit level itself («прибыль 400 млн»).
 

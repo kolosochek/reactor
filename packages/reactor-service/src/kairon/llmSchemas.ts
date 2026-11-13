@@ -14,10 +14,14 @@ import { addMonths, monthsBetween } from './patch.js';
 
 type JsonSchema = Record<string, unknown>;
 
+/** Every month from..to, both included. */
+export function planMonths(from: string, to: string): string[] {
+  const count = monthsBetween(from, to) + 1;
+  return Array.from({ length: Math.max(count, 0) }, (_, i) => addMonths(from, i));
+}
+
 export function openMonths(closedThrough: string, planEnd: string, marginMonths: number): string[] {
-  const first = addMonths(closedThrough, 1);
-  const count = monthsBetween(first, addMonths(planEnd, marginMonths)) + 1;
-  return Array.from({ length: Math.max(count, 0) }, (_, i) => addMonths(first, i));
+  return planMonths(addMonths(closedThrough, 1), addMonths(planEnd, marginMonths));
 }
 
 function closed(properties: Record<string, JsonSchema>, description?: string): JsonSchema {

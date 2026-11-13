@@ -20,6 +20,7 @@ interface RenderModule {
   renderGoalChecks(goalChecks: unknown): string;
   renderReconciliations(reconciliations: unknown): string;
   renderOverview(explanation: unknown, scored: unknown): string;
+  renderRejected(rejected: unknown): string;
   renderWidget(spec: unknown, scoredVariant: unknown, parentEval: unknown, draftEval: unknown): string;
   renderDiffView(diffView: unknown, currency?: unknown): string;
 }
@@ -174,6 +175,35 @@ describe('kairon render: recommendation overview', () => {
     ]) {
       expect(html).toContain(`${label} → <b>${winner}</b>`);
     }
+  });
+
+  it('says no draft can be recommended and why when every scored draft misses the goal', () => {
+    // SCENARIO: Review Focus 1, the only child v1.1 misses the +100 млн goal; the server blanked the recommendation
+    // INPUT: recommendation '', notRecommendable v1.1 «не выполняет цель», ranking [v1.1]
+    // EXPECTED: the head says nothing is recommended because of the goal; «Почему не другие» names v1.1 and the reason
+    const html = render.renderOverview(
+      { ...explanation, recommendation: '', whyNotOthers: [], dropped: [], notRecommendable: [{ id: 'v1.1', reason: 'не выполняет цель' }] },
+      { ranking: ['v1.1'], variants: [{ id: 'v1.1', title: 'Цены квартир вверх' }] },
+    );
+    expect(html).toContain('<div class="k-rec">Рекомендации нет: ни один вариант не выполняет цель запроса без нового нарушения красной линии</div>');
+    expect(html).toContain('<ul class="k-not"><li>v1.1 не рекомендуется: не выполняет цель.</li></ul>');
+  });
+
+  it('lists the drafts the server refused with their errors, escaped', () => {
+    // SCENARIO: Review Focus 2 and 4, a stale parent and a cover window in a closed month never reach scoring
+    // INPUT: rejected v2 (title = id) with the stale text; v3 «<b>x</b>» with a closed-month error; then []
+    // EXPECTED: one list, the title only when it differs from the id, markup escaped; '' for no refusals
+    const html = render.renderRejected([
+      { id: 'v2', title: 'v2', errors: ['Активный прогноз изменился, начните новый сценарий'] },
+      { id: 'v3', title: '<b>x</b>', errors: ['2026-07: closed through 2026-08', 'второй'] },
+    ]);
+    expect(html).toBe(
+      '<div class="k-rejected"><div class="k-part">Сервер отклонил</div><ul>' +
+        '<li><b>v2</b>: Активный прогноз изменился, начните новый сценарий</li>' +
+        '<li><b>v3</b> «&lt;b&gt;x&lt;/b&gt;»: 2026-07: closed through 2026-08; второй</li>' +
+        '</ul></div>',
+    );
+    expect(render.renderRejected([])).toBe('');
   });
 
   it('escapes a title that carries markup', () => {

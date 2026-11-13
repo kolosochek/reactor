@@ -242,19 +242,32 @@ function matrixTable(matrix, ids, recommended, titleOf) {
   );
 }
 
+/** The drafts the server refused before scoring (stale lineage, closed cover window, rejected levers); '' for none. */
+export function renderRejected(rejected) {
+  if ((rejected ?? []).length === 0) return '';
+  const items = rejected.map(
+    (r) => `<li><b>${esc(r.id)}</b>${r.title === r.id ? '' : ` «${esc(r.title)}»`}: ${esc(r.errors.join('; '))}</li>`,
+  );
+  return `<div class="k-rejected"><div class="k-part">Сервер отклонил</div><ul>${items.join('')}</ul></div>`;
+}
+
 export function renderOverview(explanation, scored) {
   const titleOf = (id) => scored.variants.find((v) => v.id === id)?.title ?? '';
   const rec = explanation.recommendation ?? '';
+  const excluded = explanation.notRecommendable ?? [];
   const head =
-    rec === ''
-      ? '<div class="k-rec">Рекомендации нет: ни один вариант не посчитан</div>'
-      : `<div class="k-rec">Рекомендую ${esc(rec)}: ${esc(titleOf(rec))}</div>`;
+    rec !== ''
+      ? `<div class="k-rec">Рекомендую ${esc(rec)}: ${esc(titleOf(rec))}</div>`
+      : excluded.length > 0
+        ? '<div class="k-rec">Рекомендации нет: ни один вариант не выполняет цель запроса без нового нарушения красной линии</div>'
+        : '<div class="k-rec">Рекомендации нет: ни один вариант не посчитан</div>';
   const say = [explanation.headline, explanation.whyRecommended, explanation.departureReason].filter((t) => typeof t === 'string' && t !== '');
   const rules = explanation.rules ?? [];
   const ids = scored.ranking.filter((id) => (explanation.matrix ?? []).some((row) => id in row.values));
   const not = [
     ...(explanation.whyNotOthers ?? []).map((w) => `<li>${esc(w.id)}: ${esc(w.reason)}</li>`),
     ...(explanation.dropped ?? []).map((d) => `<li>${esc(d.id)} отброшен: совпал с ${d.sameAs === 'parent' ? 'родителем' : esc(d.sameAs)}.</li>`),
+    ...excluded.map((n) => `<li>${esc(n.id)} не рекомендуется: ${esc(n.reason)}.</li>`),
   ];
   const switches = (explanation.switches ?? []).map(
     (s) =>
@@ -554,6 +567,7 @@ table.k-m td.best { font-weight: 700; }
 .k-rules { margin: 4px 0 0; padding-left: 20px; font-size: 12.5px; }
 .k-not { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; }
 .k-switch { display: flex; flex-wrap: wrap; gap: 6px; }
+.k-rejected { border-left: 3px solid #d03b3b; padding: 4px 10px; margin: 6px 0; font-size: 13px; } .k-rejected ul { margin: 2px 0 0; padding-left: 18px; }
 .k-switch-btn { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
 .k-tiles4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .k-tile { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; background: var(--bg-primary); }

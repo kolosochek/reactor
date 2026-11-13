@@ -105,6 +105,8 @@ export const ExplainInput = z.object({
       .array(z.object({ step: z.number().nullable(), label: z.string(), values: z.record(z.string()), best: z.string().nullable() }))
       .default([]),
     dropped: z.array(z.object({ id: z.string(), sameAs: z.string() })).default([]),
+    /** Drafts that miss an active goal or add a red-line breach: shown, never recommended (spec 5.6). */
+    notRecommendable: z.array(z.object({ id: z.string(), reason: z.string() })).default([]),
     /** The promise; its partner ids are the stakeholder parties besides the bank and the project. */
     approved: z.object({ partners: z.array(z.object({ partnerId: z.string() })) }).optional(),
   }),
@@ -133,10 +135,19 @@ const ExplainReply = z.object({
 
 type ExplainAnswer = z.infer<typeof ExplainReply>;
 
-const NOTHING_SCORED = 'Ни один вариант не посчитан сервером, объяснять нечего. Причины отказов в таблице и в трассировке.';
+const NOTHING_SCORED = 'Ни один вариант не посчитан сервером, объяснять нечего. Причины отказов перечислены выше и в трассировке.';
 
-/** null when the answer can stand: the recommendation is the top-ranked variant or carries a reason. */
-export function departureError(answer: ExplainAnswer, topRanked: string): string | null {
+/** The prompt's top-ranked line when every scored draft is excluded from the recommendation. */
+const NO_TOP = 'none: every scored variant misses the goal or adds a red-line breach. Recommend none and say how close the closest one comes';
+
+/**
+ * null when the answer can stand: the recommendation is the top-ranked variant or carries a reason, and is not
+ * an excluded draft. With nothing recommendable (topRanked '') any answer stands; the server blanks the recommendation.
+ */
+export function departureError(answer: ExplainAnswer, topRanked: string, excluded: ReadonlyMap<string, string> = new Map()): string | null {
+  if (topRanked === '') return null;
+  const reason = excluded.get(answer.recommendation);
+  if (reason !== undefined) return `The variant ${answer.recommendation} cannot be recommended: ${reason}. Recommend ${topRanked}. Return the whole JSON again.`;
   if (answer.recommendation === topRanked || (answer.departureReason ?? '') !== '') return null;
   return `The recommendation ${answer.recommendation} departs from the top-ranked variant ${topRanked} without a reason. Recommend ${topRanked}, or keep ${answer.recommendation} and write the reason in departureReason. Return the whole JSON again.`;
 }
@@ -145,7 +156,8 @@ export async function explainVariants(raw: unknown, ctx: ActivityContext) {
   const input = ExplainInput.parse(raw);
   const { facts } = input.scored;
   const ids = input.scored.variants.filter((v) => v.status === 'ok').map((v) => v.id);
-  const topRanked = input.scored.ranking.find((id) => ids.includes(id)) ?? '';
+  const excluded = new Map(input.scored.notRecommendable.map((n) => [n.id, n.reason]));
+  const topRanked = input.scored.ranking.find((id) => ids.includes(id) && !excluded.has(id)) ?? '';
   const overview = {
     rules: input.scored.rules,
     switches: input.scored.switches.map((s) => ({
@@ -155,6 +167,7 @@ export async function explainVariants(raw: unknown, ctx: ActivityContext) {
     })),
     matrix: input.scored.matrix,
     dropped: input.scored.dropped,
+    notRecommendable: input.scored.notRecommendable,
   };
   if (ids.length === 0) {
     return {
@@ -193,7 +206,7 @@ export async function explainVariants(raw: unknown, ctx: ActivityContext) {
           reconciliations: v.reconciliations,
         })),
         ranking: input.scored.ranking,
-        topRanked,
+        topRanked: topRanked === '' ? NO_TOP : topRanked,
         rules: input.scored.rules,
         switches: input.scored.switches,
       }),
@@ -217,7 +230,7 @@ export async function explainVariants(raw: unknown, ctx: ActivityContext) {
     let retry: string | null;
     try {
       candidate = ExplainReply.parse(normalizeStrictAnswer(parseJsonObject(resp.content)));
-      retry = departureError(candidate, topRanked);
+      retry = departureError(candidate, topRanked, excluded);
       if (retry === null) reply = candidate;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -259,7 +272,7 @@ export async function explainVariants(raw: unknown, ctx: ActivityContext) {
     })),
     whyRecommended: render(final.whyRecommended),
     caveats: final.caveats.map(render),
-    recommendation: final.recommendation,
+    recommendation: topRanked === '' || excluded.has(final.recommendation) ? '' : final.recommendation,
     topRanked,
     departureReason: final.departureReason === null ? null : render(final.departureReason),
     whyNotOthers: final.whyNotOthers.map((w) => ({ id: w.id, reason: render(w.reason) })),

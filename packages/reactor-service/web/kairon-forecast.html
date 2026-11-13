@@ -1438,16 +1438,18 @@ svg text { font-size: 11px; }
     return card;
   }
 
-  function renderRun(result, section, out, answers) {
+  function renderRun(result, section, out, answers, rejected) {
     const b = out.baseline, s = out.scored, e = out.explanation;
     money.decimals = b.project.decimals; money.code = b.project.currencyCode;
     s.variants.forEach((v) => section.drafts.set(v.id, v));
     Object.assign(section.facts, s.facts);
     if (answers.length) result.appendChild(el('ul', { class: 'answers' }, answers.map((a) => el('li', { text: a.text }))));
+    if (rejected.length) result.appendChild(htmlBlock('', R.renderRejected(rejected)));
     const ranked = s.ranking.map((id) => s.variants.find((v) => v.id === id)).filter((v) => v && v.status === 'ok');
     s.variants.filter((v) => v.status !== 'ok').forEach((v) => result.appendChild(errbox(v.id + ' «' + v.title + '» не посчитан: ' + v.errors.join('; '))));
     if (ranked.length === 0) { if (answers.length === 0) result.appendChild(errbox(e.headline)); return; }
-    const reco = e.recommendation || e.topRanked || ranked[0].id;
+    // '' when every scored draft misses the goal or adds a red-line breach: no tab is marked, the overview says why.
+    const reco = e.recommendation;
     const ctx = { promise: s.approved, active: s.active, v1: ranked.find((v) => v.id === 'v1') || null, reco, explanation: e, milestones: b.milestones };
     const overview = widgetBox('Рекомендация и почему', 'ранжирование: сервер · текст: LLM с плейсхолдерами', R.renderOverview(e, s));
     result.appendChild(overview);
@@ -1507,13 +1509,13 @@ svg text { font-size: 11px; }
     if (plan.kind === 'generate') {
       if (out.proposals.errors.length) { result.appendChild(errbox('Сценарий не разобран, LLM варианты не предлагала: ' + out.proposals.errors.join('; '))); return; }
       const section = openSection(plan.sectionId, text, out, result);
-      renderRun(result, section, out, []);
+      renderRun(result, section, out, [], out.proposals.rejected);
       history.push({ user: text, summary: summaryForHistory(out) });
       return;
     }
     const section = session.sections.find((s) => s.id === plan.sectionId);
     addGoal(section, out.goal.goal);
-    renderRun(result, section, out, out.drafts.answers);
+    renderRun(result, section, out, out.drafts.answers, out.drafts.rejected);
   }
 
   async function handleMessage(text, runner) {

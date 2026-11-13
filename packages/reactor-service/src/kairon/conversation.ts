@@ -19,6 +19,7 @@ import {
   goalJsonSchema,
   normalizeStrictAnswer,
   openMonths,
+  planMonths,
   parseJsonObject,
   routeJsonSchema,
   scenarioJsonSchema,
@@ -191,7 +192,9 @@ export async function structureGoal(raw: unknown, ctx: ActivityContext): Promise
   const input = StructureGoalInput.parse(raw);
   const b = input.baseline;
   const partnerIds = (b.partners.length > 0 ? b.partners : b.approved.partners).map((p) => p.partnerId);
-  const months = openMonths(b.closedThrough, b.monthRange.to, 0);
+  // The whole plan range: a window the user starts in a closed month comes back as said, and buildGoalDrafts
+  // refuses it with the month named (Review Focus 4). An open-months enum would move it silently.
+  const months = planMonths(b.monthRange.from, b.monthRange.to);
   const out = await askStructured(ctx, {
     system: goalSystemPrompt(b),
     user: input.message,

@@ -77,6 +77,22 @@ describe('POST /kairon/save', () => {
     expect(writes).toEqual([]);
   });
 
+  it('refuses a draft that changes the partners\' share target, without writing', async () => {
+    // SCENARIO: a lever patch sets shareTarget; in Kairon the share target is a project setting, a version cannot hold it
+    // INPUT: leverPatch with shareTarget equityShareBp 3000
+    // EXPECTED: 422 with the Russian reason; no write
+    const writes: WriteLog = [];
+    const out = await save(server(writes), {
+      name: 'x',
+      lineage: lineage({ leverPatch: { name: 'v2', shareTarget: { equityShareBp: 3000 } } as DraftLineage['leverPatch'] }),
+    });
+    expect(out).toEqual({
+      status: 422,
+      json: { error: 'Черновик меняет целевую долю партнёров (shareTarget). Это настройка проекта, версия прогноза её не хранит; черновик не сохранён.' },
+    });
+    expect(writes).toEqual([]);
+  });
+
   it('names the created version when the funding PUT is refused', async () => {
     // SCENARIO: the version was created, then Kairon refused its draws
     // INPUT: the cover lineage; the funding PUT answers 409

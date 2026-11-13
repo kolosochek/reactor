@@ -21,7 +21,7 @@ function scriptedLlm(replies: string[]) {
 const ctxWith = (llm: LLMProvider): ActivityContext => ({ state: {}, llm });
 const activities = createKaironActivities(fakeKaironApi(baselineEvaluate));
 const ok = (id: string) => ({ id, title: id, status: 'ok', levers: [], errors: [] });
-const EMPTY_OVERVIEW = { whyNotOthers: [], rules: [], switches: [], matrix: [], dropped: [] };
+const EMPTY_OVERVIEW = { whyNotOthers: [], rules: [], switches: [], matrix: [], dropped: [], notRecommendable: [] };
 const STAGE5_VARIANT = { verdict: '', gives: [], costs: [], stakeholders: [] };
 
 describe('kairon.planWidgets', () => {
@@ -138,7 +138,7 @@ describe('kairon.explainVariants', () => {
     );
     expect(llm.complete).toHaveBeenCalledTimes(0);
     expect(out).toEqual({
-      headline: 'Ни один вариант не посчитан сервером, объяснять нечего. Причины отказов в таблице и в трассировке.',
+      headline: 'Ни один вариант не посчитан сервером, объяснять нечего. Причины отказов перечислены выше и в трассировке.',
       variants: [],
       whyRecommended: '',
       caveats: [],
@@ -178,6 +178,51 @@ describe('kairon.explainVariants', () => {
       unknownPlaceholders: [],
       literalNumbers: [],
     });
+  });
+
+  it('recommends nothing when every scored draft misses the active goal', async () => {
+    // SCENARIO: Review Focus 1, +100 млн is out of reach; the only child v1.1 misses the goal (spec 5.6: never recommended)
+    // INPUT: v1.1 ok and ranked, notRecommendable v1.1; the reply recommends v1.1
+    // EXPECTED: 1 LLM call; recommendation '' and topRanked ''; the reason is passed on for the overview
+    const reply = JSON.stringify({ headline: 'цель вне досягаемости', variants: [], whyRecommended: '', recommendation: 'v1.1', departureReason: null, caveats: [] });
+    const llm = scriptedLlm([reply]);
+    const notRecommendable = [{ id: 'v1.1', reason: 'не выполняет цель' }];
+    const out = await activities['kairon.explainVariants'](
+      { scenario: 's', scored: { variants: [ok('v1.1')], ranking: ['v1.1'], facts: {}, notRecommendable } },
+      ctxWith(llm),
+    );
+    expect(llm.complete).toHaveBeenCalledTimes(1);
+    expect(out).toEqual({
+      headline: 'цель вне досягаемости',
+      variants: [],
+      whyRecommended: '',
+      caveats: [],
+      recommendation: '',
+      topRanked: '',
+      departureReason: null,
+      ...EMPTY_OVERVIEW,
+      notRecommendable,
+      unknownPlaceholders: [],
+      literalNumbers: [],
+    });
+  });
+
+  it('asks again when the recommendation is a draft that misses the goal, even with a reason', async () => {
+    // SCENARIO: v2 meets the goal, v3 misses it; the LLM recommends v3 and writes a departure reason
+    // INPUT: ranking v2 > v3, notRecommendable v3; reply 1 recommends v3 with a reason; reply 2 recommends v2
+    // EXPECTED: 2 LLM calls; the 2nd prompt says v3 cannot be recommended; recommendation v2
+    const reply = (recommendation: string, departureReason: string | null) =>
+      JSON.stringify({ headline: 'текст', variants: [], whyRecommended: '', recommendation, departureReason, caveats: [] });
+    const llm = scriptedLlm([reply('v3', 'дешевле'), reply('v2', null)]);
+    const out = await activities['kairon.explainVariants'](
+      { scenario: 's', scored: { variants: [ok('v2'), ok('v3')], ranking: ['v2', 'v3'], facts: {}, notRecommendable: [{ id: 'v3', reason: 'не выполняет цель' }] } },
+      ctxWith(llm),
+    );
+    expect(llm.complete).toHaveBeenCalledTimes(2);
+    expect(llm.complete.mock.calls[1]?.[0].messages.at(-1)?.content).toBe(
+      'The variant v3 cannot be recommended: не выполняет цель. Recommend v2. Return the whole JSON again.',
+    );
+    expect(out).toMatchObject({ recommendation: 'v2', topRanked: 'v2', departureReason: null });
   });
 
   it('renders the verdict and the overview parts, and copies the server rules and switches', async () => {
