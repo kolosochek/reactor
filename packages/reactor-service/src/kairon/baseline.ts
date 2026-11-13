@@ -8,7 +8,7 @@
 import { z } from 'zod';
 import { planOf, type KaironApi, type KaironMilestone, type KaironVersion } from './client.js';
 import { addMonths, type ForecastDocument, type ForecastPlan } from './patch.js';
-import { summarizeEvaluation, type EvaluationMetrics } from './summary.js';
+import { summarizeEvaluation, type EvaluationMetrics, type PartnerShare } from './summary.js';
 
 export interface LineDigest {
   code: string;
@@ -31,6 +31,10 @@ export interface Baseline {
   approved: EvaluationMetrics;
   active: EvaluationMetrics;
   lines: LineDigest[];
+  /** settings.funding.partners in settings order; empty when the project states none. */
+  partners: PartnerShare[];
+  /** The approved version's plan: what the diff view compares a draft against. */
+  approvedPlan: ForecastPlan;
 }
 
 const BoundaryShape = z.object({
@@ -106,5 +110,11 @@ export async function readBaseline(api: KaironApi): Promise<Baseline> {
     approved: summarizeEvaluation(approvedRes.json),
     active: summarizeEvaluation(activeRes.json),
     lines: digestLines(plan, closedThrough),
+    partners: (project.settings?.funding?.partners ?? []).map((p) => ({
+      partnerId: p.id,
+      name: p.name,
+      sharePct: p.sharePct,
+    })),
+    approvedPlan: planOf(approved),
   };
 }

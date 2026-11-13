@@ -13,6 +13,7 @@ import {
   summarizeEvaluation,
   type EvaluationMetrics,
 } from '../kairon/summary.js';
+import { readStage5 } from './_helpers/kaironFake.js';
 
 const RESPONSES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'kairon', 'responses');
 
@@ -50,6 +51,17 @@ describe('kairon summarizeEvaluation', () => {
       ltcBp: 7320,
       uncoveredNeedMinor: '0',
       minCashBalanceMinor: '0',
+      partnerAllocatedMinor: { solstice: '31755958181', cedar: '52453950899' },
+    });
+  });
+
+  it('reads each partner\'s allocated money from partnerFrames', () => {
+    // SCENARIO: stage 5 compares partner cash between drafts (DEV-1375)
+    // INPUT: stage5/eval-active.json
+    // EXPECTED: allocatedMinor per partner id as served
+    expect(summarizeEvaluation(readStage5('eval-active.json')).partnerAllocatedMinor).toEqual({
+      solstice: '30798138449',
+      cedar: '50219038191',
     });
   });
 });

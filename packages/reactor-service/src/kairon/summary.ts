@@ -28,13 +28,22 @@ const EvaluationShape = z.object({
     uncoveredNeedMinor: z.record(z.string()),
     cashBalanceMinor: z.record(z.string()),
   }),
-  partnerFrames: z.array(z.object({ partnerId: z.string(), name: z.string() })).optional(),
+  partnerFrames: z
+    .array(z.object({ partnerId: z.string(), name: z.string(), allocatedMinor: z.string().optional() }))
+    .optional(),
 });
 
 export interface PartnerIrr {
   partnerId: string;
   name: string;
   irr: number | null;
+}
+
+/** A partner and its agreed share of partner money, from the project's settings.funding.partners. */
+export interface PartnerShare {
+  partnerId: string;
+  name: string;
+  sharePct: number;
 }
 
 export interface EvaluationMetrics {
@@ -46,6 +55,8 @@ export interface EvaluationMetrics {
   ltcBp: number | null;
   uncoveredNeedMinor: string;
   minCashBalanceMinor: string;
+  /** partnerFrames[].allocatedMinor by partner id: the money each partner puts in over the plan. */
+  partnerAllocatedMinor: Record<string, string>;
 }
 
 export function summarizeEvaluation(json: unknown): EvaluationMetrics {
@@ -67,6 +78,9 @@ export function summarizeEvaluation(json: unknown): EvaluationMetrics {
     ltcBp: bank?.ltc?.ratioBp ?? null,
     uncoveredNeedMinor: String(Object.values(r.walk.uncoveredNeedMinor).reduce((s, v) => s + BigInt(v), 0n)),
     minCashBalanceMinor: String(minBalance),
+    partnerAllocatedMinor: Object.fromEntries(
+      (r.partnerFrames ?? []).flatMap((f) => (f.allocatedMinor === undefined ? [] : [[f.partnerId, f.allocatedMinor]])),
+    ),
   };
 }
 

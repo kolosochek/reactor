@@ -53,6 +53,15 @@ const ProjectShape = z.object({
   name: z.string(),
   currentApprovedVersionId: z.string().nullable(),
   currency: z.object({ code: z.string(), decimals: z.number().int() }),
+  settings: z
+    .object({
+      funding: z
+        .object({
+          partners: z.array(z.object({ id: z.string(), name: z.string(), sharePct: z.number() })).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
 });
 
 const VersionShape = z.object({

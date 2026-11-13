@@ -50,6 +50,21 @@ describe('kairon.baseline', () => {
     });
     expect(b.lines.find((l) => l.code === 'D1')?.openCells).toEqual({});
   });
+
+  it('reads the partners with their agreed shares and the approved plan', async () => {
+    // SCENARIO: stage 5 red lines need the partners' shares and the diff view needs the approved plan (DEV-1375)
+    // INPUT: fake API with settings.funding.partners; a fake API without them
+    // EXPECTED: Solstice 0.3 and Cedar 0.7 in settings order; the approved plan's 45 lines; no partners without settings
+    const activities = createKaironActivities(fakeApi(baselineEvaluate, { partners: true }));
+    const b = (await activities['kairon.baseline']({}, ctxWith(scriptedLlm([])))) as Baseline;
+    expect(b.partners).toEqual([
+      { partnerId: 'solstice', name: 'Solstice Sponsor', sharePct: 0.3 },
+      { partnerId: 'cedar', name: 'Cedar Partners', sharePct: 0.7 },
+    ]);
+    expect(b.approvedPlan.lines).toHaveLength(45);
+    expect(b.approvedPlan.monthRange).toEqual({ from: '2024-12', to: '2028-07' });
+    expect((await loadBaseline()).partners).toEqual([]);
+  });
 });
 
 describe('kairon.proposeVariants', () => {
