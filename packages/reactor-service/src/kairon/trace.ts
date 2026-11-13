@@ -80,5 +80,8 @@ export function traceKaironApi(api: KaironApi, emit: Emit | undefined, now: () =
       });
       return result;
     },
+    // The save route writes outside a run, so its two calls are passed through untraced.
+    createVersion: (input) => api.createVersion(input),
+    putFunding: (versionId, body) => api.putFunding(versionId, body),
   };
 }

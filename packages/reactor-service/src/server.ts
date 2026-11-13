@@ -12,6 +12,8 @@ import { registerExperienceRoute } from './routes/experience.js';
 import { registerHealthRoute } from './routes/health.js';
 import { registerKaironPageRoute } from './routes/kaironPage.js';
 import { registerKaironRunRoute } from './routes/kaironRun.js';
+import { registerKaironSaveRoute } from './routes/kaironSave.js';
+import { sharedKaironClient } from './kairon/client.js';
 import { buildReactor } from './reactor/buildReactor.js';
 import { createStreamingOpenRouter } from './kairon/openrouter.js';
 import { createSampleLLM, SAMPLE_MODEL } from './kairon/sampleLlm.js';
@@ -37,6 +39,7 @@ export async function buildServer(opts: BuildServerOptions): Promise<FastifyInst
     createLLM: (config) => (config.model === SAMPLE_MODEL ? createSampleLLM(config) : createStreamingOpenRouter(config)),
     buildReactor: (llm) => buildReactor(llm, opts.repositories),
   });
+  registerKaironSaveRoute(app, { api: () => sharedKaironClient() });
 
   return app;
 }

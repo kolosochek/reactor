@@ -91,7 +91,7 @@ const BaselineArg = z.custom<Baseline>(
 
 export { parseJsonObject } from './llmSchemas.js';
 
-function rulesOf(b: Baseline): PatchRules {
+export function rulesOf(b: Baseline): PatchRules {
   return { closedThrough: b.closedThrough, derivedLineCodes: b.derivedLineCodes };
 }
 

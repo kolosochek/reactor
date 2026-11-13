@@ -56,6 +56,8 @@ describe('kairon traceKaironApi', () => {
     ],
     getMilestones: async () => [],
     evaluate: async () => ({ status: 422, json: { message: 'closed month' } }),
+    createVersion: async () => ({ status: 500, json: null }),
+    putFunding: async () => ({ status: 500, json: null }),
   };
 
   it('reports an evaluate call with its request body and the server reply', async () => {

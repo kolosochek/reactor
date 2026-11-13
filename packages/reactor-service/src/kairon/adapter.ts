@@ -100,6 +100,8 @@ function lazyKaironClient(): KaironApi {
     listVersions: () => sharedKaironClient().listVersions(),
     getMilestones: (versionId) => sharedKaironClient().getMilestones(versionId),
     evaluate: (versionId, body) => sharedKaironClient().evaluate(versionId, body),
+    createVersion: (input) => sharedKaironClient().createVersion(input),
+    putFunding: (versionId, body) => sharedKaironClient().putFunding(versionId, body),
   };
 }
 

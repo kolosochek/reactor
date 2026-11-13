@@ -106,6 +106,10 @@ export interface KaironApi {
   listVersions(): Promise<KaironVersion[]>;
   getMilestones(versionId: string): Promise<KaironMilestone[]>;
   evaluate(versionId: string, body: unknown): Promise<HttpResult>;
+  /** POST forecast-versions: a new inactive forecast version with this plan; Kairon copies the funding section of basedOnVersionId. */
+  createVersion(input: { name: string; basedOnVersionId: string; payload: ForecastPlan }): Promise<HttpResult>;
+  /** PUT forecast-versions/:versionId/funding: the whole funding section, { baseRevision, draws }. */
+  putFunding(versionId: string, body: unknown): Promise<HttpResult>;
 }
 
 const TOKEN_TTL_MS = 14 * 60 * 1000;
@@ -130,7 +134,7 @@ export function createKaironClient(env: KaironEnv, fetchImpl: typeof fetch = fet
     return login();
   }
 
-  async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<HttpResult> {
+  async function call(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown): Promise<HttpResult> {
     const send = async (bearer: string) =>
       fetchImpl(`${env.baseUrl}${path}`, {
         method,
@@ -168,6 +172,12 @@ export function createKaironClient(env: KaironEnv, fetchImpl: typeof fetch = fet
     },
     async evaluate(versionId, body) {
       return call('POST', `${projectPath}/forecast-versions/${versionId}/evaluate`, body);
+    },
+    async createVersion(input) {
+      return call('POST', `${projectPath}/forecast-versions`, input);
+    },
+    async putFunding(versionId, body) {
+      return call('PUT', `${projectPath}/forecast-versions/${versionId}/funding`, body);
     },
   };
 }

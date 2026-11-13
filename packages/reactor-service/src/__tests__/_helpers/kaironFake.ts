@@ -40,10 +40,17 @@ export const RIVERGATE_PARTNERS = STAGE5_PROJECT.settings.funding.partners.map((
   sharePct: p.sharePct,
 }));
 
+/** Write calls the fake received, in order; a test that expects none passes no log and any write throws. */
+export type WriteLog = Array<{ op: 'createVersion' | 'putFunding'; args: unknown[] }>;
+
 export function fakeKaironApi(
   evaluate: (versionId: string, body: unknown) => HttpResult,
-  options: { partners?: boolean } = {},
+  options: { partners?: boolean; writes?: WriteLog; fundingStatus?: number } = {},
 ): KaironApi {
+  const write = (op: WriteLog[number]['op'], args: unknown[]) => {
+    if (options.writes === undefined) throw new Error(`unexpected Kairon write: ${op}`);
+    options.writes.push({ op, args });
+  };
   const project = {
     id: 'sol00001-0000-4000-8000-000000000001',
     name: 'Rivergate Park',
@@ -62,6 +69,17 @@ export function fakeKaironApi(
       { code: 'OCCUPANCY_PERMIT', name: 'Occupancy Permit', dueDate: '2027-12-30', completedAt: null },
     ],
     evaluate: async (versionId, body) => evaluate(versionId, body),
+    createVersion: async (input) => {
+      write('createVersion', [input]);
+      return { status: 201, json: { id: 'draft-1', name: input.name, role: 'forecast', isActive: false, fundingRevision: 0 } };
+    },
+    putFunding: async (versionId, body) => {
+      write('putFunding', [versionId, body]);
+      // Kairon refuses a funding PUT without the revision the draws were edited from (UpdateForecastVersionFundingDto).
+      if (typeof (body as { baseRevision?: unknown }).baseRevision !== 'number') return { status: 400, json: { message: 'baseRevision must be an integer' } };
+      const status = options.fundingStatus ?? 200;
+      return status === 200 ? { status, json: { revision: 1 } } : { status, json: { message: 'The funding section changed since you read it' } };
+    },
   };
 }
 
