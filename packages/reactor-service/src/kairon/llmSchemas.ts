@@ -116,7 +116,7 @@ export function proposalJsonSchema(
   }) as ProposalJsonSchema;
 }
 
-export function explainJsonSchema(variantIds: string[]): ProposalJsonSchema {
+export function explainJsonSchema(variantIds: string[], parties: string[] = ['bank', 'project']): ProposalJsonSchema {
   const text = (description: string): JsonSchema => ({ type: 'string', description });
   return closed({
     headline: text('Russian, one sentence for the CFO: does the promise hold and at what cost; figures only as {{key}}'),
@@ -126,6 +126,13 @@ export function explainJsonSchema(variantIds: string[]): ProposalJsonSchema {
         whatWeDo: text('Russian, 1 sentence: the business decision in a developer\'s terms; no figures'),
         whatShifts: text('Russian, 1-2 sentences: what moves in time (sales, construction, exit, funding); months allowed'),
         result: text('Russian, 1-2 sentences: partner IRR against the promise, net profit change, cash trough; figures only as {{key}}'),
+        verdict: text('Russian, one sentence: does the variant meet the goal, and the deciding figure as {{key}}'),
+        gives: arrayOf(text('Russian; figures only as {{key}}'), 'What the variant gives the client: 1-3 items'),
+        costs: arrayOf(text('Russian; figures only as {{key}}'), 'What it costs and who pays: 1-3 items'),
+        stakeholders: arrayOf(
+          closed({ party: { type: 'string', enum: parties }, meaning: text('Russian, one sentence: what the variant means for this party') }),
+          'One row per party the variant affects',
+        ),
       }),
       'One entry per scored variant, in ranking order',
     ),
@@ -136,6 +143,52 @@ export function explainJsonSchema(variantIds: string[]): ProposalJsonSchema {
       description: 'Russian; why the recommendation is not the top-ranked variant; null when it is',
     }),
     caveats: arrayOf({ type: 'string' }, 'Russian; may use {{key}} placeholders'),
+    whyNotOthers: arrayOf(
+      closed({ id: { type: 'string', enum: variantIds }, reason: text('Russian, one sentence; figures only as {{key}}') }),
+      'One entry per variant that is not recommended',
+    ),
+  }) as ProposalJsonSchema;
+}
+
+const literal = (value: string): JsonSchema => ({ type: 'string', enum: [value] });
+
+/** kairon.planWidgets: per variant id, the declarative widget specs (widgets.ts WidgetSpecSchema). */
+export function widgetsJsonSchema(variantIds: string[]): ProposalJsonSchema {
+  const title: JsonSchema = { type: 'string', description: 'Russian widget title' };
+  const specs: JsonSchema[] = [
+    closed({
+      widget: literal('matrix-diff'),
+      title,
+      rows: literal('draws[].sourceId'),
+      cols: literal('draws[].period'),
+      value: literal('amountMinor'),
+      highlight: literal('changed'),
+      delta: literal('cell, row'),
+    }),
+    closed({
+      widget: literal('bars-before-after'),
+      title,
+      x: literal('period'),
+      stack: literal('sourceId'),
+      y: literal('amountMinor'),
+      compare: arrayOf({ type: 'string' }, 'Two sides: ["parent", "draft"]'),
+      label: { type: 'string', description: 'Russian label of the delta' },
+    }),
+    closed({ widget: literal('condition-check'), title, goals: literal('active') }),
+    closed({ widget: literal('stakeholder-table'), title, rows: arrayOf({ type: 'string' }, 'Party names') }),
+  ];
+  return closed({
+    widgets: arrayOf(
+      closed({ id: { type: 'string', enum: variantIds }, specs: arrayOf({ anyOf: specs }, 'Widgets for the changed paths') }),
+      'One entry per variant',
+    ),
+  }) as ProposalJsonSchema;
+}
+
+/** kairon.answerQuestion: one Russian answer citing figures as {{key}}. */
+export function answerJsonSchema(): ProposalJsonSchema {
+  return closed({
+    answer: { type: 'string', description: 'Russian, 1-4 sentences; figures only as {{key}}' },
   }) as ProposalJsonSchema;
 }
 

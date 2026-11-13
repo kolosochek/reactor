@@ -144,14 +144,19 @@ Write from the general to the specific: first the business answer, then per vari
   - whatWeDo: the business decision in a developer's terms (prices, phasing, partner share). No figures.
   - whatShifts: what moves in time: sales and handovers, construction end, exit, the cash trough month. Use the SHIFTS given per variant.
   - result: the partners' IRR against the promise ({{vN.irr.<partner>}}, {{vN.gap.<partner>}}), the net profit change ({{vN.d.netProfit}}), the cash trough ({{vN.trough}}).
-- whyRecommended: why the recommended variant, in 1-2 sentences.
+  - verdict: one sentence, does the variant meet the client's goal; cite the deciding figure.
+  - gives: 1-3 items, what the variant gives the client.
+  - costs: 1-3 items, what it costs and who pays. A cover draft (its title says «покрывает») leaves net profit as it was: its costs cite {{vN.d.irr.<partner>}} and {{vN.d.interest}}, never a profit cost.
+  - stakeholders: one row per party the variant affects (a partner id, bank, project) with what it means for that party.
+- whyRecommended: why the recommended variant, in 1-2 sentences. Name the RANKING RULES it follows.
+- whyNotOthers: one entry per variant that is not recommended: the rule or red line that put it lower, in one sentence.
 - caveats: what the evaluation cannot see, for example bank terms and drawdown dates stay as stored, a price change on units already contracted.
 
 v1 is the scenario alone, without levers: it shows what the scenario costs; the later variants show what each lever wins back.
 
 The server ranks the variants. First come those that keep every partner at or above the promise, the one closest to the promise first; a variant below the promise ranks after all of them. A variant far above the promise is no better: it asks buyers or partners for more than the scenario costs. Recommend the top-ranked variant. If you recommend another one, write the reason in departureReason; otherwise departureReason is null.
 
-OUTPUT: only one JSON object with the keys headline, variants [{id, whatWeDo, whatShifts, result}], whyRecommended, recommendation, departureReason, caveats.`;
+OUTPUT: only one JSON object with the keys headline, variants [{id, whatWeDo, whatShifts, result, verdict, gives, costs, stakeholders}], whyRecommended, recommendation, departureReason, caveats, whyNotOthers.`;
 }
 
 export function explainUserPrompt(input: {
@@ -165,11 +170,22 @@ export function explainUserPrompt(input: {
     errors: string[];
     rationale?: string;
     shifts?: Array<{ label: string; active: string | null; variant: string | null }>;
+    redLines?: Array<{ label: string; status: string; text: string }>;
+    goalChecks?: Array<{ label: string; parent: string; draft: string }>;
+    reconciliations?: Array<{ key: string; ok: boolean; text: string }>;
   }>;
   ranking: string[];
   topRanked: string;
+  rules?: string[];
+  switches?: Array<{ label: string; winner: string }>;
 }): string {
-  return `USER'S SCENARIO:\n${input.scenario}\n\nTOP-RANKED VARIANT: ${input.topRanked}\n\nVARIANTS (ranked: at or above the promise and closest to it first: ${input.ranking.join(
+  const rules = (input.rules ?? []).map((r) => `- ${r}`).join('\n');
+  const switches = (input.switches ?? []).map((s) => `- ${s.label}: ${s.winner}`).join('\n');
+  const server = [
+    rules === '' ? '' : `RANKING RULES:\n${rules}\n\n`,
+    switches === '' ? '' : `IF THE CLIENT VALUES ANOTHER GOAL:\n${switches}\n\n`,
+  ].join('');
+  return `USER'S SCENARIO:\n${input.scenario}\n\nTOP-RANKED VARIANT: ${input.topRanked}\n\n${server}VARIANTS (ranked: at or above the promise and closest to it first: ${input.ranking.join(
     ' > ',
   )}):\n${JSON.stringify(input.variants, null, 1)}\n\nFACTS (key -> value; cite as {{key}}). Rows: approved = the promise, active = the current forecast before the scenario, v1..vN = variants:\n${Object.entries(
     input.facts,
@@ -235,4 +251,32 @@ export function goalSystemPrompt(b: Baseline): string {
 
 PARTNERS:
 ${partners}`;
+}
+
+// ---------- stage 5 (DEV-1375): widgets step and questions ----------
+
+export function widgetsSystemPrompt(): string {
+  return `You pick widgets for forecast drafts. Each draft lists the JSON paths it changed against its parent and how many cells each changed. Existing widgets already show plan.lines, walk.cumulativeNetCashMinor, exit.partners and events. Pick declarative specs for what they do not show: you name a widget and the paths it reads, never HTML and never a figure.
+
+WIDGETS:
+- matrix-diff: draws by source and month, changed cells highlighted. Use it when funding.draws changed.
+- bars-before-after: draws per month stacked by source, parent against draft.
+- condition-check: the goal checks of the draft.
+- stakeholder-table: what the draft means for each party; rows are party names.
+
+Titles are Russian. Return only one JSON object {"widgets": [{"id", "specs": [...]}]} with one entry per draft.`;
+}
+
+export function widgetsUserPrompt(variants: Array<{ id: string; changed: Array<{ path: string; cells: number }> }>): string {
+  return `DRAFTS:\n${variants.map((v) => `${v.id}: ${v.changed.map((c) => `${c.path} (${c.cells})`).join(', ') || 'nothing changed'}`).join('\n')}`;
+}
+
+export function answerSystemPrompt(): string {
+  return `You answer a CFO's question about forecast drafts, in Russian, in 1-4 sentences. A server computed every figure. You cite figures ONLY as placeholders {{key}} taken from the FACTS list; you never type a figure, percentage or amount yourself. When the facts do not answer the question, say which figure is missing. Return only one JSON object {"answer": "..."}.`;
+}
+
+export function answerUserPrompt(question: string, drafts: Array<{ id: string; title: string }>, facts: Record<string, string>): string {
+  return `QUESTION:\n${question}\n\nDRAFTS:\n${drafts.map((d) => `${d.id}: ${d.title}`).join('\n')}\n\nFACTS (key -> value; cite as {{key}}):\n${Object.entries(facts)
+    .map(([k, v]) => `${k} = ${v}`)
+    .join('\n')}`;
 }

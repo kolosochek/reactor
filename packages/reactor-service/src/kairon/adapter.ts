@@ -64,10 +64,25 @@ export const kaironForecastTools: Tool[] = [
     type: 'explicit',
   },
   {
+    name: 'kairon.planWidgets',
+    inputSchema: kaironToolInputSchemas['kairon.planWidgets'] as Tool['inputSchema'],
+    description:
+      'LLM picks declarative widget specs per draft from its changed paths; the server keeps the matrix-diff for changed draws and falls back to the defaults.',
+    category: 'transformation',
+    type: 'latent',
+  },
+  {
     name: 'kairon.explainVariants',
     inputSchema: kaironToolInputSchemas['kairon.explainVariants'] as Tool['inputSchema'],
     description:
-      'LLM explains the scored variants in Russian, citing figures only as placeholders filled from evaluate.',
+      'LLM explains the scored variants in Russian: verdict, gives, costs, stakeholders, why not the others; figures only as placeholders filled from evaluate.',
+    category: 'transformation',
+    type: 'latent',
+  },
+  {
+    name: 'kairon.answerQuestion',
+    inputSchema: kaironToolInputSchemas['kairon.answerQuestion'] as Tool['inputSchema'],
+    description: 'LLM answers a question about the drafts in Russian, citing figures only as placeholders; no drafts means a fixed answer and no call.',
     category: 'transformation',
     type: 'latent',
   },

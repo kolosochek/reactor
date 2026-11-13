@@ -3,7 +3,7 @@
 // Reactor activities of the forecast prototype (DEV-1364; stage 5 adds the
 // router and structuring steps of conversation.ts, DEV-1375). One chat turn is a
 // batch plan of four calls: baseline (explicit) -> proposeVariants (LLM) ->
-// scoreVariants (explicit, Kairon evaluate) -> explainVariants (LLM). A server
+// scoreVariants (explicit, Kairon evaluate) -> explainVariants (LLM, explain.ts). A server
 // refusal is returned as the variant's result, never thrown, because batch
 // mode aborts the whole plan on the first throw.
 //
@@ -18,10 +18,10 @@ import { checkPatch, patchLineCodes, type PatchRules } from './checks.js';
 import type { KaironApi } from './client.js';
 import { route, RouteInput, StructureGoalInput, structureGoal, StructureScenarioInput, structureScenario } from './conversation.js';
 import { diffVariant, REVENUE_GROUP_CODES, type VariantDiff } from './diff.js';
+import { AnswerInput, answerQuestion, ExplainInput, explainVariants, PlanWidgetsInput, planWidgets } from './explain.js';
 import { forecastDiffView, type DiffView } from './diffView.js';
 import {
   CUT_OFF_ERROR,
-  explainJsonSchema,
   normalizeStrictAnswer,
   openMonths,
   parseJsonObject,
@@ -46,8 +46,6 @@ import { redLines, type RedLine } from './redLines.js';
 import { changedPaths, type PathChange } from './widgets.js';
 import { applyScenario, ScenarioSpecSchema, type ScenarioSpec } from './scenario.js';
 import {
-  explainSystemPrompt,
-  explainUserPrompt,
   proposeSystemPrompt,
   proposeUserPrompt,
   type LeverMode,
@@ -57,8 +55,6 @@ import {
   buildFacts,
   diffFacts,
   formatMillions,
-  literalNumbers,
-  renderPlaceholders,
   summarizeEvaluation,
   type EvaluationMetrics,
 } from './summary.js';
@@ -67,11 +63,9 @@ import { traceActivity, traceKaironApi } from './trace.js';
 type LLMMessage = LLMCompletionRequest['messages'][number];
 
 const MAX_PROPOSE_ATTEMPTS = 3;
-const MAX_EXPLAIN_ATTEMPTS = 2;
 /** Reasoning models spent 7 677 of 8 000 tokens thinking in the live run of 13.11 and cut the JSON off. */
 const PROPOSE_MAX_TOKENS = 32_000;
 /** The structured explanation runs about 1 500 tokens; reasoning models spend more before it. */
-const EXPLAIN_MAX_TOKENS = 8_000;
 const V1_LEVERS_ERROR =
   'the first variant is the scenario alone; leave levers [] and shareTarget null, put levers into the later variants';
 
@@ -698,150 +692,6 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
   };
 }
 
-const ExplainInput = z.object({
-  scenario: z.string(),
-  scored: z.object({
-    variants: z.array(
-      z.object({
-        id: z.string(),
-        title: z.string(),
-        status: z.string(),
-        rationale: z.string().default(''),
-        levers: z.array(z.string()).default([]),
-        errors: z.array(z.string()).default([]),
-        diff: z
-          .object({
-            events: z.array(z.object({ label: z.string(), active: z.string().nullable(), variant: z.string().nullable() })),
-          })
-          .nullable()
-          .default(null),
-      }),
-    ),
-    ranking: z.array(z.string()),
-    facts: z.record(z.string()),
-  }),
-});
-
-const ExplainVariant = z.object({
-  id: z.string(),
-  whatWeDo: z.string().default(''),
-  whatShifts: z.string().default(''),
-  result: z.string().default(''),
-});
-
-const ExplainReply = z.object({
-  headline: z.string().min(1),
-  variants: z.array(ExplainVariant).default([]),
-  whyRecommended: z.string().default(''),
-  recommendation: z.string().default(''),
-  departureReason: z.string().nullable().default(null),
-  caveats: z.array(z.string()).default([]),
-});
-
-type ExplainAnswer = z.infer<typeof ExplainReply>;
-
-/** null when the answer can stand: the recommendation is the top-ranked variant or carries a reason. */
-function departureError(answer: ExplainAnswer, topRanked: string): string | null {
-  if (answer.recommendation === topRanked || (answer.departureReason ?? '') !== '') return null;
-  return `The recommendation ${answer.recommendation} departs from the top-ranked variant ${topRanked} without a reason. Recommend ${topRanked}, or keep ${answer.recommendation} and write the reason in departureReason. Return the whole JSON again.`;
-}
-
-async function explainVariants(raw: unknown, ctx: ActivityContext) {
-  const input = ExplainInput.parse(raw);
-  const { facts } = input.scored;
-  const ids = input.scored.variants.filter((v) => v.status === 'ok').map((v) => v.id);
-  const topRanked = input.scored.ranking.find((id) => ids.includes(id)) ?? '';
-  if (ids.length === 0) {
-    return {
-      headline: 'Ни один вариант не посчитан сервером, объяснять нечего. Причины отказов в таблице и в трассировке.',
-      variants: [],
-      whyRecommended: '',
-      caveats: [],
-      recommendation: '',
-      topRanked,
-      departureReason: null,
-      unknownPlaceholders: [],
-      literalNumbers: [],
-    };
-  }
-  const responseSchema = { name: 'variant_explanation', schema: explainJsonSchema(ids) };
-  const messages: LLMMessage[] = [
-    { role: 'system', content: explainSystemPrompt() },
-    {
-      role: 'user',
-      content: explainUserPrompt({
-        scenario: input.scenario,
-        facts,
-        variants: input.scored.variants.map((v) => ({
-          id: v.id,
-          title: v.title,
-          status: v.status,
-          rationale: v.rationale,
-          levers: v.levers,
-          errors: v.errors,
-          shifts: v.diff?.events ?? [],
-        })),
-        ranking: input.scored.ranking,
-        topRanked,
-      }),
-    },
-  ];
-  let reply: ExplainAnswer | null = null;
-  let candidate: ExplainAnswer | null = null;
-  let lastContent = '';
-  for (let attempt = 1; attempt <= MAX_EXPLAIN_ATTEMPTS && reply === null; attempt++) {
-    const request: KaironLLMRequest = {
-      messages: [...messages],
-      temperature: 0.3,
-      maxTokens: EXPLAIN_MAX_TOKENS,
-      jsonMode: true,
-      responseSchema,
-      label: `explainVariants, attempt ${attempt}`,
-      signal: ctx.signal,
-    };
-    const resp = await ctx.llm.complete(request);
-    lastContent = resp.content;
-    let retry: string | null;
-    try {
-      candidate = ExplainReply.parse(normalizeStrictAnswer(parseJsonObject(resp.content)));
-      retry = departureError(candidate, topRanked);
-      if (retry === null) reply = candidate;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      retry = `Return only the JSON object with the keys headline, variants, whyRecommended, recommendation, departureReason, caveats. Error: ${message}`;
-    }
-    if (retry !== null) messages.push({ role: 'assistant', content: resp.content }, { role: 'user', content: retry });
-  }
-  const final = reply ??
-    candidate ?? { headline: lastContent, variants: [], whyRecommended: '', recommendation: '', departureReason: null, caveats: [] };
-  const eventMonths = input.scored.variants.flatMap((v) => (v.diff?.events ?? []).flatMap((e) => [e.active ?? '', e.variant ?? '']));
-  const allowed = [input.scenario, ...Object.values(facts), ...eventMonths];
-  const unknown: string[] = [];
-  const literal: string[] = [];
-  const render = (template: string): string => {
-    const out = renderPlaceholders(template, facts);
-    unknown.push(...out.unknown);
-    literal.push(...literalNumbers(template, allowed));
-    return out.text;
-  };
-  return {
-    headline: render(final.headline),
-    variants: final.variants.map((v) => ({
-      id: v.id,
-      whatWeDo: render(v.whatWeDo),
-      whatShifts: render(v.whatShifts),
-      result: render(v.result),
-    })),
-    whyRecommended: render(final.whyRecommended),
-    caveats: final.caveats.map(render),
-    recommendation: final.recommendation,
-    topRanked,
-    departureReason: final.departureReason === null ? null : render(final.departureReason),
-    unknownPlaceholders: unknown,
-    literalNumbers: literal,
-  };
-}
-
 export type KaironToolName =
   | 'kairon.baseline'
   | 'kairon.route'
@@ -850,7 +700,9 @@ export type KaironToolName =
   | 'kairon.proposeVariants'
   | 'kairon.buildGoalDrafts'
   | 'kairon.scoreVariants'
-  | 'kairon.explainVariants';
+  | 'kairon.planWidgets'
+  | 'kairon.explainVariants'
+  | 'kairon.answerQuestion';
 
 /** Input JSON schemas of the four tools, shown in the trace and set on the Tool definitions. */
 export const kaironToolInputSchemas: Record<KaironToolName, Record<string, unknown>> = {
@@ -861,7 +713,9 @@ export const kaironToolInputSchemas: Record<KaironToolName, Record<string, unkno
   'kairon.proposeVariants': zodToJsonSchema(ProposeInput) as Record<string, unknown>,
   'kairon.buildGoalDrafts': zodToJsonSchema(GoalDraftsInput) as Record<string, unknown>,
   'kairon.scoreVariants': zodToJsonSchema(ScoreInput) as Record<string, unknown>,
+  'kairon.planWidgets': zodToJsonSchema(PlanWidgetsInput) as Record<string, unknown>,
   'kairon.explainVariants': zodToJsonSchema(ExplainInput) as Record<string, unknown>,
+  'kairon.answerQuestion': zodToJsonSchema(AnswerInput) as Record<string, unknown>,
 };
 
 export function createKaironActivities(api: KaironApi): Record<KaironToolName, Activity> {
@@ -885,8 +739,8 @@ export function createKaironActivities(api: KaironApi): Record<KaironToolName, A
     'kairon.scoreVariants': traced('kairon.scoreVariants', 'explicit', async (input, ctx) =>
       scoreVariants(traceKaironApi(api, ctx.onProgress), input),
     ),
-    'kairon.explainVariants': traced('kairon.explainVariants', 'latent', async (input, ctx) =>
-      explainVariants(input, ctx),
-    ),
+    'kairon.planWidgets': traced('kairon.planWidgets', 'latent', async (input, ctx) => planWidgets(input, ctx)),
+    'kairon.explainVariants': traced('kairon.explainVariants', 'latent', async (input, ctx) => explainVariants(input, ctx)),
+    'kairon.answerQuestion': traced('kairon.answerQuestion', 'latent', async (input, ctx) => answerQuestion(input, ctx)),
   };
 }

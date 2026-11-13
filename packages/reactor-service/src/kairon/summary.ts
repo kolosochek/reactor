@@ -257,6 +257,7 @@ export function diffFacts(
     facts[`${baseKey}.exitProfit`] = money(diff.profit.activeExitMinor);
     facts[`${id}.d.exitProfit`] = signedMillions(BigInt(diff.profit.variantExitMinor) - BigInt(diff.profit.activeExitMinor), currency);
   }
+  facts[`${id}.d.interest`] = signedMillions(BigInt(diff.interest.variantMinor) - BigInt(diff.interest.activeMinor), currency);
   for (const p of variant.partners) {
     const before = irrOf(active, p.partnerId);
     if (p.irr !== null && before !== null) facts[`${id}.d.irr.${p.partnerId}`] = `${signed((p.irr - before) * 100, 2)} п.п.`;

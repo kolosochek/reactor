@@ -11,6 +11,7 @@ import {
   normalizeStrictAnswer,
   openMonths,
   proposalJsonSchema,
+  widgetsJsonSchema,
 } from '../kairon/llmSchemas.js';
 import { ForecastPatchSchema, type ForecastDocument } from '../kairon/patch.js';
 
@@ -90,16 +91,63 @@ describe('kairon proposalJsonSchema, relaxed', () => {
 describe('kairon explainJsonSchema', () => {
   it('passes the strict-mode rules and restricts the recommendation to variant ids', () => {
     // SCENARIO: the explanation names a variant that exists
-    // INPUT: ids v1, v2
-    // EXPECTED: no strict violations; keys from the headline down to the caveats; recommendation and variant ids enum ["v1", "v2"]; departureReason is a string or null
-    const schema = explainJsonSchema(['v1', 'v2']);
+    // INPUT: ids v1, v2; parties solstice, cedar, bank, project
+    // EXPECTED: no strict violations; keys from the headline down to whyNotOthers; recommendation, variant and whyNotOthers ids enum ["v1", "v2"];
+    //           departureReason is a string or null; a variant carries verdict, gives, costs, stakeholders with the party enum
+    const schema = explainJsonSchema(['v1', 'v2'], ['solstice', 'cedar', 'bank', 'project']);
     expect(strictViolations(schema)).toEqual([]);
     expect((schema.properties.recommendation as { enum: string[] }).enum).toEqual(['v1', 'v2']);
     expect((schema.properties.departureReason as { anyOf: Array<{ type: string }> }).anyOf.map((s) => s.type)).toEqual(['string', 'null']);
-    expect(Object.keys(schema.properties)).toEqual(['headline', 'variants', 'whyRecommended', 'recommendation', 'departureReason', 'caveats']);
-    const item = (schema.properties.variants as { items: { properties: Record<string, { enum?: string[] }> } }).items;
-    expect(Object.keys(item.properties)).toEqual(['id', 'whatWeDo', 'whatShifts', 'result']);
+    expect(Object.keys(schema.properties)).toEqual([
+      'headline',
+      'variants',
+      'whyRecommended',
+      'recommendation',
+      'departureReason',
+      'caveats',
+      'whyNotOthers',
+    ]);
+    type Items = { items: { properties: Record<string, { enum?: string[]; items?: { properties: Record<string, { enum?: string[] }> } }> } };
+    const item = (schema.properties.variants as Items).items;
+    expect(Object.keys(item.properties)).toEqual(['id', 'whatWeDo', 'whatShifts', 'result', 'verdict', 'gives', 'costs', 'stakeholders']);
     expect(item.properties.id?.enum).toEqual(['v1', 'v2']);
+    expect(item.properties.stakeholders?.items?.properties.party?.enum).toEqual(['solstice', 'cedar', 'bank', 'project']);
+    expect((schema.properties.whyNotOthers as Items).items.properties.id?.enum).toEqual(['v1', 'v2']);
+  });
+
+  it('defaults the parties to the bank and the project', () => {
+    // SCENARIO: a project without partners
+    // INPUT: ids v1 only, no parties
+    // EXPECTED: party enum ["bank", "project"]
+    type Items = { items: { properties: { stakeholders: { items: { properties: { party: { enum: string[] } } } } } } };
+    const schema = explainJsonSchema(['v1']);
+    expect((schema.properties.variants as Items).items.properties.stakeholders.items.properties.party.enum).toEqual(['bank', 'project']);
+  });
+});
+
+describe('kairon widgetsJsonSchema', () => {
+  it('passes the strict-mode rules and offers the four declarative widgets per variant id', () => {
+    // SCENARIO: the widgets step names a widget per changed path, never HTML or figures
+    // INPUT: ids v2.1, v2.2
+    // EXPECTED: no strict violations; id enum ["v2.1", "v2.2"]; spec alternatives matrix-diff, bars-before-after, condition-check, stakeholder-table
+    const schema = widgetsJsonSchema(['v2.1', 'v2.2']);
+    expect(strictViolations(schema)).toEqual([]);
+    type Widgets = {
+      items: {
+        properties: {
+          id: { enum: string[] };
+          specs: { items: { anyOf: Array<{ properties: { widget: { enum: string[] } } }> } };
+        };
+      };
+    };
+    const item = (schema.properties.widgets as Widgets).items;
+    expect(item.properties.id.enum).toEqual(['v2.1', 'v2.2']);
+    expect(item.properties.specs.items.anyOf.map((s) => s.properties.widget.enum[0])).toEqual([
+      'matrix-diff',
+      'bars-before-after',
+      'condition-check',
+      'stakeholder-table',
+    ]);
   });
 });
 

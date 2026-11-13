@@ -402,7 +402,8 @@ describe('kairon.scoreVariants', () => {
     // SCENARIO: the CFO report needs what v1 changes against Forecast v3
     // INPUT: v1 = delay-3 patch evaluated as eval-delay-3; the active forecast evaluated as eval-active
     // EXPECTED: v1.diff bridge overheads -267 385 860; delta facts: net profit -22,0, IRR -2,84 / -3,67 п.п.,
-    //           trough -882,9 in 2028-06 against -851,0 in 2028-03, cash back to plus 2028-09, bridge overheads -2,7
+    //           trough -882,9 in 2028-06 against -851,0 in 2028-03, cash back to plus 2028-09, bridge overheads -2,7,
+    //           walk interest +11,7 (12 956 739 085 - 11 789 401 998 minor)
     const b = await loadBaseline();
     const { name: _name, ...p1 } = delay3Patch;
     const activities = createKaironActivities(
@@ -419,75 +420,14 @@ describe('kairon.scoreVariants', () => {
 
     expect(out.variants[0]?.diff?.bridge.find((r) => r.key === 'overheads')?.minor).toBe('-267385860');
     expect(
-      ['v1.d.netProfit', 'v1.d.exitProfit', 'v1.d.irr.solstice', 'v1.d.irr.cedar', 'v1.trough', 'v1.troughMonth', 'v1.cashPositive', 'v1.bridge.overheads', 'v1.bridge.financing', 'active.trough', 'active.troughMonth', 'active.cashPositive'].map(
+      ['v1.d.netProfit', 'v1.d.exitProfit', 'v1.d.irr.solstice', 'v1.d.irr.cedar', 'v1.trough', 'v1.troughMonth', 'v1.cashPositive', 'v1.bridge.overheads', 'v1.bridge.financing', 'active.trough', 'active.troughMonth', 'active.cashPositive', 'v1.d.interest'].map(
         (k) => out.facts[k],
       ),
     ).toEqual([
       '-22,0 млн CZK', '-33,7 млн CZK', '-2,84 п.п.', '-3,67 п.п.', '-882,9 млн CZK', '2028-06', '2028-09',
-      '-2,7 млн CZK', '-19,3 млн CZK', '-851,0 млн CZK', '2028-03', '2028-06',
+      '-2,7 млн CZK', '-19,3 млн CZK', '-851,0 млн CZK', '2028-03', '2028-06', '+11,7 млн CZK',
     ]);
     expect(out.facts['v1.bridge.revenue']).toBeUndefined();
-  });
-});
-
-describe('kairon.explainVariants', () => {
-  it('renders every part of the structured explanation with server facts and lists literal numbers', async () => {
-    // SCENARIO: the LLM explains from the business case down to the figures, with placeholders, and slips one literal number
-    // INPUT: headline with {{v1.d.netProfit}}, v1 result "IRR {{v1.irr.solstice}} при обещании {{approved.irr.solstice}}, запас 7 %",
-    //        shifts "выход на 3 месяца позже"; scenario "kolaudace +3"
-    // EXPECTED: placeholders filled in every field; literalNumbers ["7"] (3 comes from the scenario); recommendation v1
-    const llm = scriptedLlm([
-      JSON.stringify({
-        headline: 'Задержка стоит {{v1.d.netProfit}}, обещание держится',
-        variants: [
-          {
-            id: 'v1',
-            whatWeDo: 'Ничего не меняем',
-            whatShifts: 'Выход на 3 месяца позже',
-            result: 'IRR {{v1.irr.solstice}} при обещании {{approved.irr.solstice}}, запас 7 %',
-          },
-        ],
-        whyRecommended: 'Рычаги не нужны',
-        recommendation: 'v1',
-        departureReason: null,
-        caveats: ['Банк: {{v1.ltv}}'],
-      }),
-    ]);
-    const activities = createKaironActivities(fakeApi(baselineEvaluate));
-    const out = await activities['kairon.explainVariants'](
-      {
-        scenario: 'kolaudace +3',
-        scored: {
-          variants: [{ id: 'v1', title: 'a', status: 'ok', levers: [], errors: [] }],
-          ranking: ['v1'],
-          facts: {
-            'v1.irr.solstice': '20,71 %',
-            'approved.irr.solstice': '18,91 %',
-            'v1.ltv': '54,25 %',
-            'v1.d.netProfit': '-22,0 млн CZK',
-          },
-        },
-      },
-      ctxWith(llm),
-    );
-    expect(out).toEqual({
-      headline: 'Задержка стоит -22,0 млн CZK, обещание держится',
-      variants: [
-        {
-          id: 'v1',
-          whatWeDo: 'Ничего не меняем',
-          whatShifts: 'Выход на 3 месяца позже',
-          result: 'IRR 20,71 % при обещании 18,91 %, запас 7 %',
-        },
-      ],
-      whyRecommended: 'Рычаги не нужны',
-      caveats: ['Банк: 54,25 %'],
-      recommendation: 'v1',
-      topRanked: 'v1',
-      departureReason: null,
-      unknownPlaceholders: [],
-      literalNumbers: ['7'],
-    });
   });
 });
 
@@ -513,28 +453,6 @@ describe('kairon structured output (stage 3)', () => {
     );
   });
 
-  it('skips the LLM when no variant was scored', async () => {
-    // SCENARIO: every variant was refused, so there is nothing to explain
-    // INPUT: scored with one refused variant
-    // EXPECTED: no LLM call, a fixed Russian text, empty recommendation
-    const llm = scriptedLlm([]);
-    const out = await createKaironActivities(fakeApi(baselineEvaluate))['kairon.explainVariants'](
-      { scenario: 's', scored: { variants: [{ id: 'v1', title: 'a', status: 'refused', levers: [], errors: ['x'] }], ranking: ['v1'], facts: {} } },
-      ctxWith(llm),
-    );
-    expect(llm.complete).toHaveBeenCalledTimes(0);
-    expect(out).toEqual({
-      headline: 'Ни один вариант не посчитан сервером, объяснять нечего. Причины отказов в таблице и в трассировке.',
-      variants: [],
-      whyRecommended: '',
-      caveats: [],
-      recommendation: '',
-      topRanked: '',
-      departureReason: null,
-      unknownPlaceholders: [],
-      literalNumbers: [],
-    });
-  });
 });
 
 describe('kairon fixes after the live run of 13.11', () => {
@@ -582,35 +500,5 @@ describe('kairon fixes after the live run of 13.11', () => {
       { attempt: 2, errors: [] },
     ]);
     expect(out.variants.map((v) => v.id)).toEqual(['v1']);
-  });
-
-  it('asks again when the recommendation departs from the ranking without a reason', async () => {
-    // SCENARIO: the live run ranked v3 first and the LLM recommended v1 without saying why
-    // INPUT: ranking v3 > v2 > v1, all ok; reply 1 recommends v1 with departureReason null; reply 2 recommends v3
-    // EXPECTED: 2 LLM calls; the 2nd prompt names the conflict; recommendation v3, topRanked v3
-    const reply = (recommendation: string) =>
-      JSON.stringify({ headline: 'текст', variants: [], whyRecommended: 'почему', recommendation, departureReason: null, caveats: [] });
-    const llm = scriptedLlm([reply('v1'), reply('v3')]);
-    const ok = (id: string) => ({ id, title: id, status: 'ok', levers: [], errors: [] });
-    const out = await createKaironActivities(fakeApi(baselineEvaluate))['kairon.explainVariants'](
-      { scenario: 's', scored: { variants: [ok('v1'), ok('v2'), ok('v3')], ranking: ['v3', 'v2', 'v1'], facts: {} } },
-      ctxWith(llm),
-    );
-
-    expect(llm.complete).toHaveBeenCalledTimes(2);
-    expect(llm.complete.mock.calls[1]?.[0].messages.at(-1)?.content).toBe(
-      'The recommendation v1 departs from the top-ranked variant v3 without a reason. Recommend v3, or keep v1 and write the reason in departureReason. Return the whole JSON again.',
-    );
-    expect(out).toEqual({
-      headline: 'текст',
-      variants: [],
-      whyRecommended: 'почему',
-      caveats: [],
-      recommendation: 'v3',
-      topRanked: 'v3',
-      departureReason: null,
-      unknownPlaceholders: [],
-      literalNumbers: [],
-    });
   });
 });

@@ -45,4 +45,24 @@ describe('kairon explain prompts', () => {
     const user = explainUserPrompt({ scenario: 's', facts: {}, variants: [], ranking: ['v3', 'v2', 'v1'], topRanked: 'v3' });
     expect(user).toContain('TOP-RANKED VARIANT: v3');
   });
+
+  it('tells the model what a cover draft costs and passes the server rules', () => {
+    // SCENARIO: a cover draft moves money between partners and leaves net profit as it was (advisor, Task 14)
+    // INPUT: rules and one switch in the user prompt
+    // EXPECTED: the system prompt names IRR and interest as the cover's cost; the user prompt carries the rules and the switch
+    expect(explainSystemPrompt()).toContain(
+      'A cover draft (its title says «покрывает») leaves net profit as it was: its costs cite {{vN.d.irr.<partner>}} and {{vN.d.interest}}, never a profit cost.',
+    );
+    const user = explainUserPrompt({
+      scenario: 's',
+      facts: {},
+      variants: [],
+      ranking: ['v2.1'],
+      topRanked: 'v2.1',
+      rules: ['При равенстве выигрывает вариант с меньшим числом рычагов.'],
+      switches: [{ label: 'Важна прибыль как в плане', winner: 'v2.1' }],
+    });
+    expect(user).toContain('RANKING RULES:\n- При равенстве выигрывает вариант с меньшим числом рычагов.');
+    expect(user).toContain('IF THE CLIENT VALUES ANOTHER GOAL:\n- Важна прибыль как в плане: v2.1');
+  });
 });
