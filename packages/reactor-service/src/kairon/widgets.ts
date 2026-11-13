@@ -15,6 +15,12 @@ import { changedPlanCells } from './reconcile.js';
 
 export type ChangedPath = 'plan.lines' | 'funding.draws' | 'walk.cumulativeNetCashMinor' | 'exit.partners' | 'events';
 
+/** A changed path and how many cells (lines' months, source-months, months, partners, events) it changed. */
+export interface PathChange {
+  path: ChangedPath;
+  cells: number;
+}
+
 export const EXISTING_WIDGETS: Record<Exclude<ChangedPath, 'funding.draws'>, 'bridge' | 'cash' | 'irr' | 'timeline'> = {
   'plan.lines': 'bridge',
   'walk.cumulativeNetCashMinor': 'cash',
@@ -90,11 +96,11 @@ export function changedPaths(input: {
   parentEval: unknown;
   draftEval: unknown;
   diff: VariantDiff;
-}): Array<{ path: ChangedPath; cells: number }> {
+}): PathChange[] {
   const parent = PathShape.parse(input.parentEval);
   const draft = PathShape.parse(input.draftEval);
   const irrOf = (e: Evaluation) => new Map((e.exit?.partners ?? []).map((p) => [p.partnerId, p.irr]));
-  const counts: Array<{ path: ChangedPath; cells: number }> = [
+  const counts: PathChange[] = [
     { path: 'plan.lines', cells: [...changedPlanCells(input.parentBody, input.draftBody).values()].reduce((s, n) => s + n, 0) },
     { path: 'funding.draws', cells: differing(drawCells(parent), drawCells(draft), 0n) },
     { path: 'walk.cumulativeNetCashMinor', cells: differing(parent.walk.cumulativeNetCashMinor, draft.walk.cumulativeNetCashMinor, '0') },
@@ -124,11 +130,11 @@ const BARS: WidgetSpec = {
   label: 'Δ за месяц',
 };
 
-export function defaultWidgets(changed: Array<{ path: ChangedPath }>): WidgetSpec[] {
+export function defaultWidgets(changed: PathChange[]): WidgetSpec[] {
   return changed.some((c) => c.path === 'funding.draws') ? [MATRIX, BARS] : [];
 }
 
-export function withMandatory(specs: WidgetSpec[], changed: Array<{ path: ChangedPath }>): WidgetSpec[] {
+export function withMandatory(specs: WidgetSpec[], changed: PathChange[]): WidgetSpec[] {
   const paths = new Set(changed.map((c) => c.path));
   const kept = specs.filter((s) => {
     const reads = WIDGET_PATHS[s.widget];
