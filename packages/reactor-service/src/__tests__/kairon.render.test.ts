@@ -5,9 +5,13 @@
 
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { diffVariant } from '../kairon/diff.js';
+import { forecastDiffView } from '../kairon/diffView.js';
+import { applyPatch, type ForecastPlan } from '../kairon/patch.js';
 import { redLines } from '../kairon/redLines.js';
 import { summarizeEvaluation } from '../kairon/summary.js';
-import { readStage5, RIVERGATE_PARTNERS } from './_helpers/kaironFake.js';
+import { defaultWidgets } from '../kairon/widgets.js';
+import { fixtureDoc, readStage5, RIVERGATE_PARTNERS } from './_helpers/kaironFake.js';
 
 interface RenderModule {
   renderVerdict(explanation: unknown, scoredVariant: unknown): string;
@@ -16,6 +20,8 @@ interface RenderModule {
   renderGoalChecks(goalChecks: unknown): string;
   renderReconciliations(reconciliations: unknown): string;
   renderOverview(explanation: unknown, scored: unknown): string;
+  renderWidget(spec: unknown, scoredVariant: unknown, parentEval: unknown, draftEval: unknown): string;
+  renderDiffView(diffView: unknown, currency?: unknown): string;
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -177,5 +183,68 @@ describe('kairon render: recommendation overview', () => {
     const html = render.renderOverview(explanation, scored);
     expect(html).toContain('Рекомендую v1: &lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html.includes('<script>')).toBe(false);
+  });
+});
+
+describe('kairon render: widgets', () => {
+  const [matrixSpec, barsSpec] = defaultWidgets([{ path: 'funding.draws', cells: 14 }]);
+  const windowMonths = ['2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02'];
+  const coverDraft = {
+    id: 'v1.1',
+    goalChecks: [
+      {
+        goal: { type: 'funding_cover', partnerId: 'cedar', fromMonth: '2026-09', months: 6 },
+        part: 'funding.draws',
+        label: 'Cedar Partners покрывает всю потребность 6 мес. с 2026-09',
+        parent: 'breach',
+        draft: 'ok',
+        months: windowMonths.map((month) => ({ month, parent: false, draft: true })),
+      },
+    ],
+  };
+  const parentEval = readStage5('eval-active.json');
+  const draftEval = readStage5('cover-cedar.eval.json');
+  const rowOf = (html: string, name: string) => {
+    const start = html.indexOf(`<tr><td>${name}</td>`);
+    return start === -1 ? '' : html.slice(start, html.indexOf('</tr>', start) + 5);
+  };
+
+  it('shows the w1 matrix with the window delta and the row total, draft minus parent', () => {
+    // SCENARIO: the Cedar cover draft; the funding rule pays Solstice's share back in 2027-03 and 2027-04
+    // INPUT: matrix-diff spec; eval-active as the parent, cover-cedar.eval as the draft; the goal window 2026-09..2027-02
+    // EXPECTED: columns 2026-09..2027-04; Cedar Δ in the window +33,1 and Σ Δ ±0,0; Solstice −33,1 and ±0,0; changed cells carry the delta
+    const html = render.renderWidget(matrixSpec, coverDraft, parentEval, draftEval);
+    expect(html.split('<th class="m">').length - 1).toBe(8);
+    expect(rowOf(html, 'Cedar Partners loan')).toContain('<td class="sum"><b>+33,1</b></td><td class="sum">±0,0</td></tr>');
+    expect(rowOf(html, 'Solstice Sponsor loan')).toContain('<td class="sum"><b>−33,1</b></td><td class="sum">±0,0</td></tr>');
+    expect(rowOf(html, 'Cedar Partners loan')).toContain('<td class="chg"><b>8,2</b><small>+2,7</small></td>');
+  });
+
+  it('draws one before/after pair per month and labels the delta of the goal partner', () => {
+    // SCENARIO: the w2 bars for the same draft
+    // INPUT: bars-before-after spec
+    // EXPECTED: 8 month pairs; the legend names the Cedar source as the labelled delta
+    const html = render.renderWidget(barsSpec, coverDraft, parentEval, draftEval);
+    expect(html.split('<g class="k-pair"').length - 1).toBe(8);
+    expect(html).toContain('подпись: Δ Cedar Partners loan, млн');
+  });
+});
+
+describe('kairon render: diff view copy', () => {
+  it('fills the tiles for construction +8 % with words for costs', () => {
+    // SCENARIO: s2-v1 against the active forecast (Task 8 data)
+    // INPUT: forecastDiffView of s2-v1
+    // EXPECTED: «Затраты к базе» 53,7 млн CZK перерасход; «Не покрыто финансированием» 0,0 млн CZK; D5 among the changed lines
+    const CZK = { decimals: 2, currencyCode: 'CZK' };
+    const parentPlan = applyPatch(fixtureDoc, { name: 'active' }).plan;
+    const draftPlan = (readStage5('s2-v1.body.json') as { plan: ForecastPlan }).plan;
+    const pe = readStage5('eval-active.json');
+    const de = readStage5('s2-v1.eval.json');
+    const diff = diffVariant({ currency: CZK, closedThrough: '2026-08', derivedLineCodes: [], activePlan: parentPlan, variantPlan: draftPlan, activeEval: pe, variantEval: de });
+    const view = forecastDiffView({ parentPlan, draftPlan, approvedPlan: readStage5('approved-plan.json') as ForecastPlan, parentEval: pe, draftEval: de, diff, revenueGroups: ['R', 'C'] });
+    const html = render.renderDiffView(view, CZK);
+    expect(html).toContain('<div class="c">Затраты к базе</div><div class="n">53,7 млн CZK</div><div class="d">перерасход</div>');
+    expect(html).toContain('<div class="c">Не покрыто финансированием</div><div class="n">0,0 млн CZK</div><div class="d">в родителе 0,0 млн CZK</div>');
+    expect(html).toContain('<td>D5</td><td>Construction - new build</td>');
   });
 });

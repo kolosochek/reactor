@@ -273,6 +273,236 @@ export function renderOverview(explanation, scored) {
   ].join('');
 }
 
+// ---------- widgets (w1, w2, declarative specs) ----------
+
+const PALETTE = ['#2a78d6', '#6250d6', '#1baf7a', '#eda100', '#8a8f98'];
+const TAGS = {
+  'matrix-diff': 'w1 · таблица-дифф · всегда',
+  'bars-before-after': 'w2 · было / стало',
+  'condition-check': 'b1 · цели',
+  'stakeholder-table': 'стороны',
+};
+
+/** A signed delta in millions with a typographic minus; zero reads ±0,0. */
+export function delta(minor, currency = CZK) {
+  const value = Number(minor) / 10 ** currency.decimals / 1e6;
+  const text = Math.abs(value).toFixed(1).replace('.', ',');
+  if (text === '0,0') return '±0,0';
+  return value > 0 ? `+${text}` : `−${text}`;
+}
+
+function drawCells(evaluation) {
+  const cells = new Map();
+  for (const d of evaluation.draws ?? []) {
+    const key = `${d.sourceId}|${d.period.slice(0, 7)}`;
+    cells.set(key, (cells.get(key) ?? 0n) + BigInt(d.amountMinor));
+  }
+  return cells;
+}
+
+function goalWindow(variant) {
+  return new Set((variant.goalChecks ?? []).flatMap((c) => c.months.map((m) => m.month)));
+}
+
+/** The months a widget shows: every month with a changed cell, plus the goal window. */
+function shownMonths(parent, draft, window) {
+  const months = new Set(window);
+  for (const key of new Set([...parent.keys(), ...draft.keys()])) {
+    if ((parent.get(key) ?? 0n) !== (draft.get(key) ?? 0n)) months.add(key.slice(key.indexOf('|') + 1));
+  }
+  return [...months].sort();
+}
+
+function drawsView(variant, parentEval, draftEval) {
+  const parent = drawCells(parentEval);
+  const draft = drawCells(draftEval);
+  const window = goalWindow(variant);
+  const sources = (draftEval.walk?.sources ?? []).map((s) => ({ id: s.id, name: s.name }));
+  return { parent, draft, window, sources, months: shownMonths(parent, draft, window) };
+}
+
+function matrixDiff(variant, parentEval, draftEval, currency) {
+  const v = drawsView(variant, parentEval, draftEval);
+  const hasWindow = v.window.size > 0;
+  const sum = (minor) => (minor === 0n ? `<td class="sum">${delta(minor, currency)}</td>` : `<td class="sum"><b>${delta(minor, currency)}</b></td>`);
+  const head =
+    `<tr><th>Источник, млн</th>${v.months.map((m) => `<th class="m">${esc(m)}</th>`).join('')}` +
+    `${hasWindow ? '<th>Δ в окне</th>' : ''}<th>Σ Δ</th></tr>`;
+  const rows = v.sources.map((s) => {
+    let inWindow = 0n;
+    let total = 0n;
+    const cells = v.months.map((m) => {
+      const before = v.parent.get(`${s.id}|${m}`) ?? 0n;
+      const after = v.draft.get(`${s.id}|${m}`) ?? 0n;
+      const d = after - before;
+      total += d;
+      if (v.window.has(m)) inWindow += d;
+      if (d === 0n) return `<td class="same">${after === 0n ? '—' : millions(after, currency)}</td>`;
+      return `<td class="chg"><b>${millions(after, currency)}</b><small>${delta(d, currency)}</small></td>`;
+    });
+    return `<tr><td>${esc(s.name)}</td>${cells.join('')}${hasWindow ? sum(inWindow) : ''}${sum(total)}</tr>`;
+  });
+  const need = draftEval.walk?.cashNeedMinor ?? {};
+  const needRow =
+    `<tr class="k-need"><td class="k-muted">Потребность</td>` +
+    `${v.months.map((m) => `<td class="same">${millions(need[m] ?? '0', currency)}</td>`).join('')}` +
+    `${hasWindow ? '<td></td>' : ''}<td></td></tr>`;
+  const legend =
+    '<div class="k-legend"><span>жёлтая ячейка: транш изменён, под ним Δ к родителю</span>' +
+    (hasWindow ? '<span>Δ в окне: за месяцы цели</span>' : '') +
+    '<span>Σ Δ: за все показанные месяцы</span></div>';
+  return `<table class="k-t k-matrix">${head}${rows.join('')}${needRow}</table>${legend}`;
+}
+
+/** The source whose delta labels the bars: the cover goal's partner, else the largest total change. */
+function labelledSource(v, variant, draftEval) {
+  const partnerId = (variant.goalChecks ?? []).find((c) => c.goal?.type === 'funding_cover')?.goal.partnerId;
+  const group = (draftEval.sourceGroups ?? []).find((g) => partnerId !== undefined && g.partnerId === partnerId);
+  const byGoal = v.sources.find((s) => group !== undefined && s.id === group.sourceId);
+  if (byGoal !== undefined) return byGoal;
+  const moved = (s) =>
+    v.months.reduce((acc, m) => {
+      const d = (v.draft.get(`${s.id}|${m}`) ?? 0n) - (v.parent.get(`${s.id}|${m}`) ?? 0n);
+      return acc + (d < 0n ? -d : d);
+    }, 0n);
+  return v.sources.reduce((best, s) => (best === null || moved(s) > moved(best) ? s : best), null);
+}
+
+function barsBeforeAfter(variant, parentEval, draftEval, currency) {
+  const v = drawsView(variant, parentEval, draftEval);
+  if (v.months.length === 0) return '<div class="k-muted">Транши не изменились.</div>';
+  const height = (cells, m) => v.sources.reduce((acc, s) => acc + Math.max(Number(cells.get(`${s.id}|${m}`) ?? 0n), 0), 0);
+  const max = Math.max(1, ...v.months.flatMap((m) => [height(v.parent, m), height(v.draft, m)]));
+  const slot = 406 / v.months.length;
+  const w = Math.max(Math.min(18, slot / 2 - 3), 2);
+  const scale = (minor) => (152 * Math.max(Number(minor), 0)) / max;
+  const labelled = labelledSource(v, variant, draftEval);
+  const stack = (cells, m, x, opacity) => {
+    let y = 166;
+    return v.sources
+      .map((s, i) => {
+        const h = scale(cells.get(`${s.id}|${m}`) ?? 0n);
+        y -= h;
+        return h === 0 ? '' : `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${PALETTE[i % PALETTE.length]}" opacity="${opacity}"/>`;
+      })
+      .join('');
+  };
+  const windowed = v.months.filter((m) => v.window.has(m));
+  const shade =
+    windowed.length === 0
+      ? ''
+      : `<rect x="${(30 + v.months.indexOf(windowed[0]) * slot).toFixed(1)}" y="14" width="${(windowed.length * slot).toFixed(1)}" height="152" fill="#eda100" opacity=".07"/><text x="${(34 + v.months.indexOf(windowed[0]) * slot).toFixed(1)}" y="24">окно цели</text>`;
+  const pairs = v.months.map((m, i) => {
+    const x0 = 30 + i * slot + (slot - 2 * w - 2) / 2;
+    const d = labelled === null ? 0n : (v.draft.get(`${labelled.id}|${m}`) ?? 0n) - (v.parent.get(`${labelled.id}|${m}`) ?? 0n);
+    const top = 166 - scale(height(v.draft, m));
+    const label = d === 0n ? '' : `<text class="ink" x="${(x0 + 1.5 * w + 2).toFixed(1)}" y="${(top - 4).toFixed(1)}" text-anchor="middle">${delta(d, currency)}</text>`;
+    return (
+      `<g class="k-pair" data-month="${esc(m)}">${stack(v.parent, m, x0, '0.38')}${stack(v.draft, m, x0 + w + 2, '1')}${label}` +
+      `<text x="${(x0 + w + 1).toFixed(1)}" y="182" text-anchor="middle">${esc(m)}</text></g>`
+    );
+  });
+  const swatches = v.sources.map((s, i) => `<span><span class="k-sw" style="background:${PALETTE[i % PALETTE.length]}"></span>${esc(s.name)}</span>`);
+  const note = labelled === null ? '' : ` · подпись: Δ ${esc(labelled.name)}, млн`;
+  return (
+    `<svg viewBox="0 0 440 190" width="100%" role="img" aria-label="Транши по месяцам: родитель и черновик">` +
+    `<line x1="30" x2="436" y1="166" y2="166" stroke="var(--border)" stroke-width="1"/>${shade}${pairs.join('')}</svg>` +
+    `<div class="k-legend">${swatches.join('')}<span>бледный: родитель · яркий: черновик${note}</span></div>`
+  );
+}
+
+function stakeholderTable(spec, variant) {
+  const rows = spec.rows.map((name) => {
+    const partner = (variant.metrics?.partners ?? []).find((p) => p.name === name);
+    const irr = partner === undefined || partner.irr === null ? '—' : percent(partner.irr);
+    return `<tr><td>${esc(name)}</td><td>${esc(irr)}</td></tr>`;
+  });
+  return `<table class="k-t"><tr><th>Сторона</th><th>IRR</th></tr>${rows.join('')}</table>`;
+}
+
+export function renderWidget(spec, variant, parentEval, draftEval, currency = CZK) {
+  const body =
+    spec.widget === 'matrix-diff'
+      ? matrixDiff(variant, parentEval, draftEval, currency)
+      : spec.widget === 'bars-before-after'
+        ? barsBeforeAfter(variant, parentEval, draftEval, currency)
+        : spec.widget === 'condition-check'
+          ? renderGoalChecks(variant.goalChecks ?? [])
+          : stakeholderTable(spec, variant);
+  return (
+    `<div class="k-widget"><div class="k-wh"><b>${esc(spec.title)}</b><span class="k-tag">${TAGS[spec.widget] ?? esc(spec.widget)}</span></div>${body}` +
+    `<details class="k-specd"><summary>спецификация виджета</summary><pre class="k-spec">${esc(JSON.stringify(spec, null, 1))}</pre></details></div>`
+  );
+}
+
+// ---------- copy of Kairon's forecast diff view ----------
+
+const absBig = (v) => (v < 0n ? -v : v);
+
+function tile(caption, value, detail) {
+  return `<div class="k-tile"><div class="c">${esc(caption)}</div><div class="n">${esc(value)}</div><div class="d">${esc(detail)}</div></div>`;
+}
+
+function contributorBars(contributors, currency) {
+  const max = Math.max(1, ...contributors.flatMap((c) => [Number(c.parentMinor), Number(c.draftMinor)]));
+  return contributors
+    .map((c, i) => {
+      const w = (minor) => ((260 * Math.max(Number(minor), 0)) / max).toFixed(1);
+      const color = PALETTE[i % PALETTE.length];
+      return (
+        `<div class="k-contrib"><span>${esc(c.name)}</span><svg viewBox="0 0 262 18" width="262" height="18" role="img" aria-label="${esc(c.name)}: родитель и черновик">` +
+        `<rect x="1" y="1" width="${w(c.parentMinor)}" height="7" rx="2" fill="${color}" opacity="0.38"/>` +
+        `<rect x="1" y="10" width="${w(c.draftMinor)}" height="7" rx="2" fill="${color}"/></svg>` +
+        `<span class="k-muted">${millions(c.parentMinor, currency)} → ${millions(c.draftMinor, currency)} (${delta(BigInt(c.draftMinor) - BigInt(c.parentMinor), currency)})</span></div>`
+      );
+    })
+    .join('');
+}
+
+export function renderDiffView(view, currency = { ...CZK, currencyCode: 'CZK' }) {
+  const code = currency.currencyCode ?? 'CZK';
+  const money = (minor) => `${millions(absBig(BigInt(minor)), currency)} млн ${code}`;
+  const t = view.tiles;
+  const costs = BigInt(t.costsDeltaMinor);
+  const revenue = BigInt(t.revenueDeltaMinor);
+  const tiles = [
+    tile('Затраты к базе', money(costs), costs < 0n ? 'перерасход' : costs > 0n ? 'экономия' : 'без изменений'),
+    tile('Выручка к базе', money(revenue), revenue > 0n ? 'выше' : revenue < 0n ? 'ниже' : 'без изменений'),
+    tile('Сверх утверждённого', money(t.overApprovedMinor), `строк: ${t.overApprovedLines}`),
+    tile('Не покрыто финансированием', money(t.uncoveredMinor), `в родителе ${money(t.uncoveredParentMinor)}`),
+  ];
+  const lines = view.changedLines.map((l) => {
+    const d = BigInt(l.draftMinor) - BigInt(l.parentMinor);
+    const cost = BigInt(l.parentMinor) <= 0n && BigInt(l.draftMinor) <= 0n;
+    const word = cost ? (d < 0n ? 'дороже на' : 'дешевле на') : d > 0n ? 'выше на' : 'ниже на';
+    return `<tr><td>${esc(l.code)}</td><td>${esc(l.name)}</td><td>${money(l.parentMinor)}</td><td>${money(l.draftMinor)}</td><td>${word} ${money(d)}</td></tr>`;
+  });
+  const approved = view.againstApproved.map(
+    (g) =>
+      `<tr><td>${esc(g.groupCode)}</td><td>${money(g.draftMinor)}</td><td>${money(g.approvedMinor)}</td>` +
+      `<td>${esc(g.words)} ${money(BigInt(g.draftMinor) - BigInt(g.approvedMinor))}</td></tr>`,
+  );
+  const coverage = view.coverage.covered
+    ? '<div class="k-cov"><span class="c-ok">✓</span> Финансирование покрывает потребность в каждом открытом месяце</div>'
+    : '<div class="k-cov"><span class="c-bad">✗</span> Финансирование не покрывает потребность</div>';
+  const notices = view.coverage.notices.length === 0 ? '' : `<ul class="k-not">${list(view.coverage.notices)}</ul>`;
+  const events = (view.events ?? []).map(
+    (e) => `<tr${e.active === e.variant ? '' : ' class="moved"'}><td>${esc(e.label)}</td><td>${esc(e.active ?? '—')}</td><td>${esc(e.variant ?? '—')}</td></tr>`,
+  );
+  return [
+    `<div class="k-tiles k-tiles4">${tiles.join('')}</div>`,
+    lines.length === 0
+      ? ''
+      : `<div class="k-part">Что меняется</div><table class="k-t"><tr><th>Код</th><th>Строка</th><th>Родитель</th><th>Черновик</th><th>Изменение</th></tr>${lines.join('')}</table>`,
+    `<div class="k-part">Кто вносит</div>${contributorBars(view.contributors, currency)}<div class="k-legend"><span>бледный: родитель · яркий: черновик</span></div>`,
+    approved.length === 0
+      ? ''
+      : `<div class="k-part">Против утверждённого бюджета</div><table class="k-t"><tr><th>Группа</th><th>Черновик</th><th>Утверждено</th><th>Разница</th></tr>${approved.join('')}</table>`,
+    `<div class="k-part">Покрытие</div>${coverage}${notices}`,
+    events.length === 0 ? '' : `<div class="k-part">События</div><table class="k-t"><tr><th>Событие</th><th>Родитель</th><th>Черновик</th></tr>${events.join('')}</table>`,
+  ].join('');
+}
+
 // ---------- styles ----------
 
 export const CARD_CSS = `
@@ -323,6 +553,20 @@ table.k-m td.best { font-weight: 700; }
 .k-not { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; }
 .k-switch { display: flex; flex-wrap: wrap; gap: 6px; }
 .k-switch-btn { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.k-tiles4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.k-tile { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; background: var(--bg-primary); }
+.k-tile .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.k-tile .c { font-size: 11px; color: var(--text-secondary); }
+.k-tile .d { font-size: 12px; color: var(--text-secondary); }
+table.k-matrix td, table.k-matrix th { text-align: right; } table.k-matrix td:first-child, table.k-matrix th:first-child { text-align: left; }
+td.chg { background: color-mix(in srgb, #eda100 22%, transparent); } td.chg b { display: block; font-weight: 600; } td.chg small { color: var(--text-secondary); }
+td.same { color: var(--text-tertiary); } td.sum { white-space: nowrap; }
+tr.moved td { background: color-mix(in srgb, #eda100 10%, transparent); }
+.k-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.k-specd summary { font-size: 11px; color: var(--text-tertiary); cursor: pointer; margin-top: 4px; }
+.k-spec { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; background: var(--bg-primary); border-radius: 6px; padding: 5px 7px; margin: 4px 0 0; white-space: pre-wrap; color: var(--text-secondary); }
+.k-contrib { display: grid; grid-template-columns: 170px 262px 1fr; gap: 8px; align-items: center; font-size: 12px; padding: 2px 0; }
+.k-cov { font-size: 12.5px; }
 svg text { font-size: 10.5px; fill: var(--text-secondary); }
 svg text.ink { fill: var(--text-primary); font-weight: 600; }
 `;
