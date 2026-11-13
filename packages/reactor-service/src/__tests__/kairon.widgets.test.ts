@@ -9,6 +9,7 @@ import {
   changedPaths,
   defaultWidgets,
   EXISTING_WIDGETS,
+  widgetInputs,
   WidgetSpecSchema,
   withMandatory,
   type WidgetSpec,
@@ -114,5 +115,19 @@ describe('kairon widget specs', () => {
     };
     expect(WidgetSpecSchema.parse(example)).toEqual(example);
     expect(WidgetSpecSchema.safeParse({ ...example, html: '<b>' }).success).toBe(false);
+  });
+});
+
+describe('kairon widgetInputs', () => {
+  it('keeps only what the draws widgets read from an evaluation', () => {
+    // SCENARIO: the page draws w1 and w2 from the scored variant, not from the full evaluation
+    // INPUT: cover-cedar.eval
+    // EXPECTED: draws without provenance, walk with sources {id, name} and cashNeedMinor only, sourceGroups {sourceId, partnerId}
+    const out = widgetInputs(readStage5('cover-cedar.eval.json'));
+    expect(Object.keys(out)).toEqual(['draws', 'walk', 'sourceGroups']);
+    expect(Object.keys(out.walk)).toEqual(['sources', 'cashNeedMinor']);
+    expect(out.draws[0]).toEqual({ sourceId: '7c1962e8-a12d-42ca-82cc-4bea10338044', period: '2026-09-01', amountMinor: '0' });
+    expect(out.walk.sources.map((s) => s.name)).toEqual(['Bank Financing', 'Solstice Sponsor loan', 'Cedar Partners loan']);
+    expect(out.sourceGroups.map((g) => g.partnerId ?? null)).toEqual([null, 'solstice', 'cedar']);
   });
 });

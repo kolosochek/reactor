@@ -43,7 +43,7 @@ import { applyPatch, ForecastPatchSchema, type EvaluateBody, type ForecastDocume
 import { criteriaMatrix, rankDrafts, sameAsEarlier, switchesFor, type DraftScore } from './ranking.js';
 import { reconcile, type Reconciliation } from './reconcile.js';
 import { redLines, type RedLine } from './redLines.js';
-import { changedPaths, type PathChange } from './widgets.js';
+import { changedPaths, widgetInputs, type PathChange, type WidgetInputs } from './widgets.js';
 import { applyScenario, ScenarioSpecSchema, type ScenarioSpec } from './scenario.js';
 import {
   proposeSystemPrompt,
@@ -148,6 +148,8 @@ const ProposeInput = z.object({
   count: z.number().int().min(1).max(4).default(3),
   scenarioSpec: ScenarioSpecSchema.default({ type: 'free' }),
   section: z.string().default('S1'),
+  /** structureScenario's errors in the same batch: non-empty means the phrase was not structured, so nothing is asked. */
+  scenarioErrors: z.array(z.string()).default([]),
 });
 
 interface LeverAsk {
@@ -239,6 +241,9 @@ function appliedText(spec: ScenarioSpec): string {
 
 async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContext) {
   const input = ProposeInput.parse(raw);
+  if (input.scenarioErrors.length > 0) {
+    return { section: input.section, variants: [], rejected: [], openQuestions: [], attempts: [], model: '', errors: input.scenarioErrors };
+  }
   const b = input.baseline;
   const doc = await loadDocument(api, b.forecastVersion.id);
   const activePlanHash = planHash(doc);
@@ -255,11 +260,11 @@ async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContex
   });
   if (spec.type === 'free') {
     const out = await askVariants(ctx, { b, doc, scenario: input.scenario, history: input.history, count: input.count });
-    return { section: input.section, variants: out.accepted.map(draft), rejected: out.rejected, openQuestions: out.openQuestions, attempts: out.attempts, model: out.model };
+    return { section: input.section, variants: out.accepted.map(draft), rejected: out.rejected, openQuestions: out.openQuestions, attempts: out.attempts, model: out.model, errors: [] };
   }
   const scenario = applyScenario(doc, rulesOf(b), spec);
   if (scenario.errors.length > 0) {
-    return { section: input.section, variants: [], rejected: [{ id: 'v1', title: input.scenario, errors: scenario.errors }], openQuestions: [], attempts: [], model: '' };
+    return { section: input.section, variants: [], rejected: [{ id: 'v1', title: input.scenario, errors: scenario.errors }], openQuestions: [], attempts: [], model: '', errors: [] };
   }
   const v1: DraftVariant = {
     id: 'v1',
@@ -272,7 +277,7 @@ async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContex
   };
   const ids = Array.from({ length: input.count - 1 }, (_, i) => `v${i + 2}`);
   if (ids.length === 0) {
-    return { section: input.section, variants: [v1], rejected: [], openQuestions: [], attempts: [], model: '' };
+    return { section: input.section, variants: [v1], rejected: [], openQuestions: [], attempts: [], model: '', errors: [] };
   }
   const out = await askVariants(ctx, {
     b,
@@ -289,6 +294,7 @@ async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContex
     openQuestions: out.openQuestions,
     attempts: out.attempts,
     model: out.model,
+    errors: [],
   };
 }
 
@@ -448,6 +454,8 @@ export interface ScoredVariant {
   goalChecks: GoalCheck[];
   changed: PathChange[];
   diffView: DiffView | null;
+  /** What w1 and w2 read from the parent's and the draft's evaluation; null unless Kairon scored it. */
+  widgetInputs: { parent: WidgetInputs; draft: WidgetInputs } | null;
   /** Server-side scoring inputs the ranking reads. */
   touchesReserve: boolean;
   reserveLeftMinor: string;
@@ -556,6 +564,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
       goalChecks: [],
       changed: [],
       diffView: null,
+      widgetInputs: null,
       touchesReserve: false,
       reserveLeftMinor: '0',
     };
@@ -619,6 +628,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
         diff,
         revenueGroups: REVENUE_GROUP_CODES,
       }),
+      widgetInputs: { parent: widgetInputs(parent.eval), draft: widgetInputs(res.json) },
       touchesReserve: reserve.touches,
       reserveLeftMinor: reserve.leftMinor,
     };

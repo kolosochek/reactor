@@ -10,7 +10,7 @@ import { forecastDiffView } from '../kairon/diffView.js';
 import { applyPatch, type ForecastPlan } from '../kairon/patch.js';
 import { redLines } from '../kairon/redLines.js';
 import { summarizeEvaluation } from '../kairon/summary.js';
-import { defaultWidgets } from '../kairon/widgets.js';
+import { defaultWidgets, widgetInputs } from '../kairon/widgets.js';
 import { fixtureDoc, readStage5, RIVERGATE_PARTNERS } from './_helpers/kaironFake.js';
 
 interface RenderModule {
@@ -202,8 +202,9 @@ describe('kairon render: widgets', () => {
       },
     ],
   };
-  const parentEval = readStage5('eval-active.json');
-  const draftEval = readStage5('cover-cedar.eval.json');
+  // The page passes the scored variant's widgetInputs, the trimmed evaluations (Task 19).
+  const parentEval = widgetInputs(readStage5('eval-active.json'));
+  const draftEval = widgetInputs(readStage5('cover-cedar.eval.json'));
   const rowOf = (html: string, name: string) => {
     const start = html.indexOf(`<tr><td>${name}</td>`);
     return start === -1 ? '' : html.slice(start, html.indexOf('</tr>', start) + 5);

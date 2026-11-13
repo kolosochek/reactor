@@ -7,6 +7,7 @@ import { createKaironActivities } from '../kairon/activities.js';
 import type { Baseline } from '../kairon/baseline.js';
 import type { KaironLLMRequest } from '../kairon/openrouter.js';
 import { canonicalJson, planHash, type DraftLineage } from '../kairon/lineage.js';
+import { widgetInputs } from '../kairon/widgets.js';
 import {
   baselineEvaluate,
   fakeKaironApi as fakeApi,
@@ -141,6 +142,28 @@ describe('kairon.proposeVariants on a stated scenario (stage 5)', () => {
     expect(llm.complete.mock.calls[0]?.[0].messages[0]?.content).toContain('Return exactly 3 variants with ids v2, v3, v4.');
   });
 
+  it('asks nothing when the scenario step could not structure the phrase', async () => {
+    // SCENARIO: Task 11 ruling, structureScenario failed twice and returned errors in the same batch
+    // INPUT: scenarioErrors ['lineCodes: unknown line code X9']
+    // EXPECTED: no LLM call; no variants; the errors returned
+    const b = await loadBaseline();
+    const llm = scriptedLlm([]);
+    const out = await createKaironActivities(fakeApi(baselineEvaluate))['kairon.proposeVariants'](
+      { scenario: 'Стройка дорожает', baseline: b, scenarioErrors: ['lineCodes: unknown line code X9'] },
+      ctxWith(llm),
+    );
+    expect(llm.complete).toHaveBeenCalledTimes(0);
+    expect(out).toEqual({
+      section: 'S1',
+      variants: [],
+      rejected: [],
+      openQuestions: [],
+      attempts: [],
+      model: '',
+      errors: ['lineCodes: unknown line code X9'],
+    });
+  });
+
   it('keeps the stage 4 delay variant and gives it a free lineage', async () => {
     // SCENARIO: regression; the kolaudace phrase stays a free scenario
     // INPUT: one reply with the recorded delay-3 patch as v1
@@ -270,6 +293,7 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
         status: string;
         redLines: Array<{ key: string; status: string; baseStatus: string }>;
         goalChecks: Array<{ draft: string; months: Array<{ draft: boolean }> }>;
+        widgetInputs: { parent: unknown; draft: unknown } | null;
       }>;
       ranking: string[];
       dropped: Array<{ id: string; sameAs: string }>;
@@ -333,6 +357,28 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
     expect(v21?.redLines.find((l) => l.key === 'parity')?.status).toBe('warn');
     expect(v21?.goalChecks[0]?.draft).toBe('ok');
     expect(v21?.goalChecks[0]?.months.filter((m) => m.draft)).toHaveLength(6);
+  });
+
+  it('carries the widget inputs of the parent and the draft', async () => {
+    // SCENARIO: the page draws w1 and w2 for v2.1 from the scored output (DEV-1376)
+    // INPUT: the cover child v2.1 of v2 (the active forecast)
+    // EXPECTED: widgetInputs.parent = widgetInputs(eval-active), widgetInputs.draft = widgetInputs(cover-cedar.eval)
+    const draws = (readJson('stage5/cover-cedar.body.json') as { draws: unknown[] }).draws;
+    const child = draft('v2.1', [], lineage({ steps: [{ type: 'cover', goal: COVER_GOAL, draws } as DraftLineage['steps'][number]] }), 'v2');
+    const out = await score({ proposals: { variants: [child] }, parents: [{ id: 'v2', lineage: lineage({}) }], goals: [COVER_GOAL] });
+    expect(out.variants[0]?.widgetInputs).toEqual({
+      parent: widgetInputs(readJson('stage5/eval-active.json')),
+      draft: widgetInputs(readJson('stage5/cover-cedar.eval.json')),
+    });
+  });
+
+  it('scores an empty proposal without an error', async () => {
+    // SCENARIO: phrase 6, every parent already meets the goal, so buildGoalDrafts drafts nothing
+    // INPUT: no variants, one answer
+    // EXPECTED: no variants, empty ranking, the answer passed through
+    const answers = [{ parentId: 'v1', text: 'Цель уже выполнена в v1' }];
+    const out = await score({ proposals: { variants: [], answers }, parents: [], goals: [] });
+    expect([out.variants, out.ranking, out.answers]).toEqual([[], [], answers]);
   });
 
   it('answers that a goal is out of reach within the lever bounds', async () => {

@@ -67,6 +67,19 @@ const WIDGET_PATHS: Record<WidgetSpec['widget'], ChangedPath[]> = {
   'stakeholder-table': ['funding.draws', 'exit.partners'],
 };
 
+const WidgetInputsShape = z.object({
+  draws: z.array(z.object({ sourceId: z.string(), period: z.string(), amountMinor: z.string() })),
+  walk: z.object({ sources: z.array(z.object({ id: z.string(), name: z.string() })), cashNeedMinor: z.record(z.string()) }),
+  sourceGroups: z.array(z.object({ sourceId: z.string(), partnerId: z.string().optional() })),
+});
+
+/** The slice of an evaluation the draws widgets (w1, w2) read; it rides on each scored variant. */
+export type WidgetInputs = z.infer<typeof WidgetInputsShape>;
+
+export function widgetInputs(evaluation: unknown): WidgetInputs {
+  return WidgetInputsShape.parse(evaluation);
+}
+
 const PathShape = z.object({
   draws: z.array(z.object({ sourceId: z.string(), period: z.string(), amountMinor: z.string() })),
   walk: z.object({ cumulativeNetCashMinor: z.record(z.string()) }),
