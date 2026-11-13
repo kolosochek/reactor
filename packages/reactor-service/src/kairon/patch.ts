@@ -10,7 +10,7 @@
 
 import { z } from 'zod';
 
-const Month = z.string().length(7);
+export const Month = z.string().length(7);
 const LineCodes = z.array(z.string().min(1)).min(1);
 
 export const ForecastPatchSchema = z.object({
