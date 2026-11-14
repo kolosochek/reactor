@@ -268,6 +268,33 @@ describe('kairon.buildGoalDrafts', () => {
     expect(llm.complete.mock.calls[0]?.[0].messages[0]?.content).toContain('Return exactly 1 variants with ids v1.1.');
   });
 
+  const RIVERGATE = [
+    { partnerId: 'solstice', name: 'Solstice Sponsor', sharePct: 0.3 },
+    { partnerId: 'cedar', name: 'Cedar Partners', sharePct: 0.7 },
+  ];
+  const ACTIVE_PARENT = { id: 'v2', lineage: { activePlanHash: HASH, scenario: { type: 'free' as const }, leverPatch: null, steps: [] } };
+
+  it('refuses a parent built on another active forecast and drafts nothing', async () => {
+    // SCENARIO: DEV-1377 (Review Focus 2), the active forecast changed after v2 was built; the user now asks Cedar to cover 6 months
+    // INPUT: funding_cover cedar 2026-09 × 6; parent v2 with activePlanHash 'stale'
+    // EXPECTED: no LLM call; no draft, no answer; v2 rejected with the stale text
+    const b = await loadBaseline();
+    const llm = scriptedLlm([]);
+    const goal = { type: 'funding_cover' as const, partnerId: 'cedar', fromMonth: '2026-09', months: 6 };
+    const out = await createKaironActivities(fakeApi(stage5Evaluate))['kairon.buildGoalDrafts'](
+      { baseline: { ...b, partners: RIVERGATE }, goal, parents: [{ ...ACTIVE_PARENT, lineage: { ...ACTIVE_PARENT.lineage, activePlanHash: 'stale' } }], existingIds: ['v1', 'v2', 'v3'] },
+      ctxWith(llm),
+    );
+    expect(llm.complete).toHaveBeenCalledTimes(0);
+    expect(out).toEqual({
+      variants: [],
+      answers: [],
+      rejected: [{ id: 'v2', title: 'v2', errors: ['Активный прогноз изменился, начните новый сценарий'] }],
+      attempts: [],
+      model: '',
+    });
+  });
+
   it('answers that no draft was built when every lever for the goal is refused', async () => {
     // SCENARIO: DEV-1377, «+100 млн чистой прибыли» on S2 v1; the LLM answers R1 × 1.05 three times, outside the ±3 % bound
     // INPUT: net_profit_target delta 10 000 000 000 minor; 3 replies with scale R1 × 1 050 000 as v1.1
