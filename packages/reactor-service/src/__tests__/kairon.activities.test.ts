@@ -334,6 +334,44 @@ describe('kairon.buildGoalDrafts', () => {
     expect(out.rejected.map((r) => r.id)).toEqual(['v1.1']);
     expect(out.answers).toEqual([{ parentId: 'v1', text: 'Цель недостижима рычагами в пределах ±3 %: черновик для v1 не построен' }]);
   });
+
+  it('answers with the error, and no claim about the goal, when the reply is cut off three times', async () => {
+    // SCENARIO: DEV-1377 review, a draft that was not built because the model's JSON never closed says nothing about the goal's reach
+    // INPUT: net_profit_target delta 10 000 000 000 minor on S2 v1; 3 replies with finishReason 'length'
+    // EXPECTED: 3 LLM calls; no variant; nothing rejected; one answer naming the cut-off error, without «Цель недостижима»
+    const b = await loadBaseline();
+    const cutOff = { content: '{"variants":[', finishReason: 'length' as const };
+    const llm = scriptedLlm([cutOff, cutOff, cutOff]);
+    const goal = { type: 'net_profit_target' as const, amountMinor: '10000000000', basis: 'delta' as const };
+    const out = (await createKaironActivities(fakeApi(stage5Evaluate))['kairon.buildGoalDrafts'](
+      { baseline: b, goal, parents: [S2_PARENTS[0]], existingIds: ['v1', 'v2', 'v3', 'v4'] },
+      ctxWith(llm),
+    )) as { variants: unknown[]; answers: Array<{ parentId: string; text: string }>; rejected: Array<{ id: string }> };
+    expect(llm.complete).toHaveBeenCalledTimes(3);
+    expect(out.variants).toEqual([]);
+    expect(out.rejected).toEqual([]);
+    expect(out.answers).toEqual([
+      { parentId: 'v1', text: 'Черновик для v1 не построен: reply: cut off at the token limit (finish_reason length) before the JSON closed' },
+    ]);
+  });
+
+  it('answers with the first refusal when a lever fails a check other than its bounds', async () => {
+    // SCENARIO: DEV-1377 review, an unknown line code is the model's mistake and says nothing about the goal's reach
+    // INPUT: the same goal on S2 v1; 3 replies with scale ZZ9 × 1.02 as v1.1 (inside ±3 %, the line does not exist)
+    // EXPECTED: v1.1 rejected; one answer naming the unknown line code, without «Цель недостижима»
+    const b = await loadBaseline();
+    const empty = { stretch: [], shift: [], extend: [], scale: [], set: [], monthRangeTo: null, shareTarget: null };
+    const patch = { ...empty, scale: [{ lineCodes: ['ZZ9'], fromMonth: '2026-09', factorPpm: 1_020_000 }] };
+    const reply = JSON.stringify({ variants: [{ id: 'v1.1', title: 'Нет такой строки', rationale: 'r', levers: ['строка'], patch }], openQuestions: [] });
+    const llm = scriptedLlm([reply, reply, reply]);
+    const goal = { type: 'net_profit_target' as const, amountMinor: '10000000000', basis: 'delta' as const };
+    const out = (await createKaironActivities(fakeApi(stage5Evaluate))['kairon.buildGoalDrafts'](
+      { baseline: b, goal, parents: [S2_PARENTS[0]], existingIds: ['v1', 'v2', 'v3', 'v4'] },
+      ctxWith(llm),
+    )) as { answers: Array<{ parentId: string; text: string }>; rejected: Array<{ id: string }> };
+    expect(out.rejected.map((r) => r.id)).toEqual(['v1.1']);
+    expect(out.answers).toEqual([{ parentId: 'v1', text: 'Черновик для v1 не построен: ZZ9: unknown line code' }]);
+  });
 });
 
 describe('kairon.scoreVariants against parents (stage 5)', () => {

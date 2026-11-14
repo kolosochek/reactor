@@ -51,7 +51,11 @@ export function patchOpCount(patch: ForecastPatch): number {
   return entries + (patch.monthRangeTo === undefined ? 0 : 1) + (patch.shareTarget === undefined ? 0 : 1);
 }
 
-function boundErrors(patch: ForecastPatch): string[] {
+/**
+ * The errors of a lever outside its bounds: a scale beyond ±3 %, a shift, stretch or extend beyond the month limit.
+ * A draft refused only for these asked for more than the levers may give; any other error is a mistake in the reply.
+ */
+export function leverBoundErrors(patch: ForecastPatch): string[] {
   const errors: string[] = [];
   for (const op of patch.scale ?? []) {
     if (op.factorPpm < SCALE_MIN_PPM || op.factorPpm > SCALE_MAX_PPM) {
@@ -66,8 +70,12 @@ function boundErrors(patch: ForecastPatch): string[] {
   for (const op of patch.extend ?? []) {
     if (op.months > MAX_MONTHS) errors.push(`extend: months ${op.months} is above ${MAX_MONTHS}`);
   }
-  if (patch.draws !== undefined) errors.push('draws: not supported by this prototype; leave them out');
   return errors;
+}
+
+function boundErrors(patch: ForecastPatch): string[] {
+  const draws = patch.draws === undefined ? [] : ['draws: not supported by this prototype; leave them out'];
+  return [...leverBoundErrors(patch), ...draws];
 }
 
 function nonZeroCells(cells: Record<string, string>): Array<[string, bigint]> {

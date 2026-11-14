@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { Activity, ActivityContext, LLMCompletionRequest } from '@kolosochek/reactor-core';
 import { digestLines, loadDocument, readBaseline, type Baseline } from './baseline.js';
-import { checkPatch, patchLineCodes, patchOpCount, type PatchRules } from './checks.js';
+import { checkPatch, leverBoundErrors, patchLineCodes, patchOpCount, type PatchRules } from './checks.js';
 import type { KaironApi } from './client.js';
 import { route, RouteInput, StructureGoalInput, structureGoal, StructureScenarioInput, structureScenario } from './conversation.js';
 import { diffVariant, REVENUE_GROUP_CODES, type VariantDiff } from './diff.js';
@@ -100,7 +100,12 @@ interface Judgement {
   accepted: Variant[];
   rejected: Array<{ id: string; title: string; errors: string[] }>;
   openQuestions: string[];
+  /** Every variant was refused, and each only because a lever is outside its bounds. */
+  outOfBounds: boolean;
 }
+
+/** A reply the server could not judge variant by variant; the arrays are never written to. */
+const NOTHING_JUDGED: Omit<Judgement, 'errors'> = { accepted: [], rejected: [], openQuestions: [], outOfBounds: false };
 
 /**
  * expectedIds: the ids the server asked for (lever mode); null in free mode,
@@ -112,14 +117,15 @@ function judgeProposal(content: string, doc: ForecastDocument, rules: PatchRules
     raw = parseJsonObject(content);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return { errors: [`reply: ${message}`], accepted: [], rejected: [], openQuestions: [] };
+    return { ...NOTHING_JUDGED, errors: [`reply: ${message}`] };
   }
   const parsed = ProposalSchema.safeParse(normalizeStrictAnswer(raw));
   if (!parsed.success) {
     const errors = parsed.error.issues.map((i) => `reply: ${i.path.join('.')}: ${i.message}`);
-    return { errors, accepted: [], rejected: [], openQuestions: [] };
+    return { ...NOTHING_JUDGED, errors };
   }
-  const judgement: Judgement = { errors: [], accepted: [], rejected: [], openQuestions: parsed.data.openQuestions };
+  const judgement: Judgement = { errors: [], accepted: [], rejected: [], openQuestions: parsed.data.openQuestions, outOfBounds: false };
+  let onlyBounds = true;
   for (const variant of parsed.data.variants) {
     const leversInV1 =
       expectedIds === null && variant.id === 'v1' && (variant.levers.length > 0 || variant.patch.shareTarget !== undefined);
@@ -132,10 +138,13 @@ function judgeProposal(content: string, doc: ForecastDocument, rules: PatchRules
     if (errors.length === 0) {
       judgement.accepted.push(variant);
     } else {
+      const bounds = leverBoundErrors({ ...variant.patch, name: variant.id });
+      if (!errors.every((e) => bounds.includes(e))) onlyBounds = false;
       judgement.rejected.push({ id: variant.id, title: variant.title, errors });
       judgement.errors.push(...errors.map((e) => `${variant.id}: ${e}`));
     }
   }
+  judgement.outOfBounds = onlyBounds && judgement.accepted.length === 0 && judgement.rejected.length > 0;
   return judgement;
 }
 
@@ -168,6 +177,8 @@ interface LeverAnswer {
   openQuestions: string[];
   attempts: Array<{ attempt: number; errors: string[] }>;
   model: string;
+  /** The last attempt refused every variant only for a lever outside its bounds. */
+  outOfBounds: boolean;
 }
 
 /** The propose loop: strict schema, server checks on `doc`, up to 3 attempts with the errors fed back. */
@@ -187,7 +198,7 @@ async function askVariants(ctx: ActivityContext, ask: LeverAsk): Promise<LeverAn
     { role: 'user', content: proposeUserPrompt(ask.scenario, view, ask.history) },
   ];
   const attempts: LeverAnswer['attempts'] = [];
-  let last: Judgement = { errors: [], accepted: [], rejected: [], openQuestions: [] };
+  let last: Judgement = { ...NOTHING_JUDGED, errors: [] };
   let model = '';
   for (let attempt = 1; attempt <= MAX_PROPOSE_ATTEMPTS; attempt++) {
     const request: KaironLLMRequest = {
@@ -203,7 +214,7 @@ async function askVariants(ctx: ActivityContext, ask: LeverAsk): Promise<LeverAn
     model = resp.model;
     const cutOff = resp.finishReason === 'length';
     last = cutOff
-      ? { errors: [CUT_OFF_ERROR], accepted: [], rejected: [], openQuestions: [] }
+      ? { ...NOTHING_JUDGED, errors: [CUT_OFF_ERROR] }
       : judgeProposal(resp.content, doc, rulesOf(b), ask.levers?.ids ?? null);
     attempts.push({ attempt, errors: last.errors });
     ctx.onProgress?.({ type: 'kairon.propose.attempt', payload: { attempt, errors: last.errors } });
@@ -218,7 +229,7 @@ async function askVariants(ctx: ActivityContext, ask: LeverAsk): Promise<LeverAn
       },
     );
   }
-  return { accepted: last.accepted, rejected: last.rejected, openQuestions: last.openQuestions, attempts, model };
+  return { accepted: last.accepted, rejected: last.rejected, openQuestions: last.openQuestions, attempts, model, outOfBounds: last.outOfBounds };
 }
 
 /** A proposed draft: what the page keeps in its section and sends back for scoring, goals and the save. */
@@ -388,7 +399,10 @@ async function buildGoalDrafts(api: KaironApi, raw: unknown, ctx: ActivityContex
     model = out.model;
     attempts.push(...out.attempts);
     rejected.push(...out.rejected);
-    if (out.accepted.length === 0) answers.push({ parentId: parent.id, text: noDraftText(parent.id) });
+    if (out.accepted.length === 0) {
+      const reason = out.rejected[0]?.errors[0] ?? out.attempts.at(-1)?.errors[0] ?? 'модель не предложила вариант';
+      answers.push({ parentId: parent.id, text: out.outOfBounds ? noDraftText(parent.id) : notBuiltText(parent.id, reason) });
+    }
     for (const v of out.accepted) {
       taken.push(v.id);
       variants.push({
@@ -529,8 +543,10 @@ const RULE_LEVERS = 'При равенстве выигрывает вариан
 const UNREACHABLE = 'Цель недостижима рычагами в пределах ±3 %:';
 /** The answer for a draft that misses the goal it was built for; `id` is ranked, so the page shows it. */
 const closestText = (id: string) => `${UNREACHABLE} ближе всего ${id}`;
-/** The answer for a parent whose every lever the server refused: there is no draft to show. */
+/** The answer for a parent whose every lever is outside its bounds: the levers cannot reach the goal, so there is no draft. */
 const noDraftText = (parentId: string) => `${UNREACHABLE} черновик для ${parentId} не построен`;
+/** The answer for a parent whose draft failed for any other reason; it says nothing about the goal's reach. */
+const notBuiltText = (parentId: string, reason: string) => `Черновик для ${parentId} не построен: ${reason}`;
 
 function goalRule(goal: RankGoal, b: Baseline): string {
   if (goal.type === 'net_profit_target') {
