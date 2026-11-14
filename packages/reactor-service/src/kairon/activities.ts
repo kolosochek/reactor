@@ -541,7 +541,7 @@ function ownLeverCount(lineage: DraftLineage, namedLevers: string[]): number {
 const RULE_RED_LINES = 'Красные линии отсекают варианты: отсекает только нарушение, которое добавил сам вариант.';
 const RULE_LEVERS = 'При равенстве выигрывает вариант с меньшим числом рычагов.';
 const UNREACHABLE = 'Цель недостижима рычагами в пределах ±3 %:';
-/** The answer for a draft that misses the goal it was built for; `id` is ranked, so the page shows it. */
+/** The answer for a draft that misses the goal it was built for; `id` is ranked, so its card is on the page. */
 const closestText = (id: string) => `${UNREACHABLE} ближе всего ${id}`;
 /** The answer for a parent whose every lever is outside its bounds: the levers cannot reach the goal, so there is no draft. */
 const noDraftText = (parentId: string) => `${UNREACHABLE} черновик для ${parentId} не построен`;

@@ -281,6 +281,15 @@ export function renderRouteNote(route) {
   return `<div class="k-route-note">Маршрут не разобран: ${esc(error)}. Ответ дан как на вопрос.</div>`;
 }
 
+/**
+ * The answers a run shows above its cards: the scoring's list. It starts as a copy of the goal drafts' answers
+ * («Цель уже выполнена в vN», «Черновик для vN не построен: …») and adds «ближе всего vN» for a draft that
+ * misses its goal. A recording saved before the scoring carried answers has none.
+ */
+export function answersOf(out) {
+  return out?.scored?.answers ?? [];
+}
+
 export function renderOverview(explanation, scored) {
   const titleOf = (id) => scored.variants.find((v) => v.id === id)?.title ?? '';
   const rec = explanation.recommendation ?? '';

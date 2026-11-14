@@ -1439,8 +1439,9 @@ svg text { font-size: 11px; }
     return card;
   }
 
-  function renderRun(result, section, out, answers, rejected) {
+  function renderRun(result, section, out, rejected) {
     const b = out.baseline, s = out.scored, e = out.explanation;
+    const answers = R.answersOf(out);
     money.decimals = b.project.decimals; money.code = b.project.currencyCode;
     s.variants.forEach((v) => section.drafts.set(v.id, v));
     Object.assign(section.facts, s.facts);
@@ -1510,13 +1511,13 @@ svg text { font-size: 11px; }
     if (plan.kind === 'generate') {
       if (out.proposals.errors.length) { result.appendChild(errbox('Сценарий не разобран, LLM варианты не предлагала: ' + out.proposals.errors.join('; '))); return; }
       const section = openSection(plan.sectionId, text, out, result);
-      renderRun(result, section, out, [], out.proposals.rejected);
+      renderRun(result, section, out, out.proposals.rejected);
       history.push({ user: text, summary: summaryForHistory(out) });
       return;
     }
     const section = session.sections.find((s) => s.id === plan.sectionId);
     addGoal(section, out.goal.goal);
-    renderRun(result, section, out, out.drafts.answers, out.drafts.rejected);
+    renderRun(result, section, out, out.drafts.rejected);
   }
 
   async function handleMessage(text, runner) {

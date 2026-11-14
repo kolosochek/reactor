@@ -25,6 +25,7 @@ interface RenderModule {
   renderDiffView(diffView: unknown, currency?: unknown): string;
   saveOutcome(status: number, json: unknown): { text: string; canRetry: boolean };
   renderRouteNote(route: unknown): string;
+  answersOf(out: unknown): Array<{ parentId: string; text: string }>;
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -346,5 +347,24 @@ describe('kairon render: route note', () => {
       '<div class="k-route-note">Маршрут не разобран: scope: unknown draft &lt;v5&gt;; known: v1, all. Ответ дан как на вопрос.</div>',
     );
     expect(render.renderRouteNote({ kind: 'goal_change', scope: ['v2'], error: null })).toBe('');
+  });
+});
+
+describe('kairon render: answers of a run', () => {
+  it('reads the answers from the scoring, which adds its own to the goal drafts\' answers', () => {
+    // SCENARIO: DEV-1377 review, scoreVariants copies the goal drafts' answers and adds «ближе всего vN»; the page showed only the drafts' answers
+    // INPUT: a goal change output: drafts.answers = 1 «Цель уже выполнена», scored.answers = that line + «ближе всего v1.1»
+    // EXPECTED: both lines, in the scoring's order
+    const met = { parentId: 'v2', text: 'Цель уже выполнена в v2' };
+    const closest = { parentId: 'v1', text: 'Цель недостижима рычагами в пределах ±3 %: ближе всего v1.1' };
+    expect(render.answersOf({ drafts: { answers: [met] }, scored: { answers: [met, closest] } })).toEqual([met, closest]);
+  });
+
+  it('reads a generate run the same way and a recording without answers as none', () => {
+    // SCENARIO: a generate run has no goal drafts; a stage 4 recording was saved before the scoring carried answers
+    // INPUT: {proposals, scored: {answers: []}}; then {scored: {}}
+    // EXPECTED: [] for both
+    expect(render.answersOf({ proposals: { variants: [] }, scored: { answers: [] } })).toEqual([]);
+    expect(render.answersOf({ scored: {} })).toEqual([]);
   });
 });
