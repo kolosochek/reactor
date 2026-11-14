@@ -422,8 +422,14 @@ const ScoreInput = z.object({
     answers: z.array(z.object({ parentId: z.string(), text: z.string() })).default([]),
   }),
   parents: z.array(z.object({ id: z.string().min(1), lineage: DraftLineageSchema })).default([]),
-  goals: z.array(GoalSchema).default([]),
+  // The page sends the section goals plus the new one last; a new goal replaces the section goal of its type.
+  goals: z.array(GoalSchema).default([]).transform(lastGoalPerType),
 });
+
+/** One goal per type, the last one given. */
+function lastGoalPerType<G extends { type: string }>(goals: G[]): G[] {
+  return goals.filter((g, i) => !goals.slice(i + 1).some((later) => later.type === g.type));
+}
 
 function refusalMessage(json: unknown): string {
   if (typeof json === 'object' && json !== null) {

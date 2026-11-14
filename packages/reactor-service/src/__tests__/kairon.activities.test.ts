@@ -292,7 +292,7 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
         id: string;
         status: string;
         redLines: Array<{ key: string; status: string; baseStatus: string }>;
-        goalChecks: Array<{ draft: string; months: Array<{ draft: boolean }> }>;
+        goalChecks: Array<{ goal: unknown; draft: string; months: Array<{ draft: boolean }> }>;
         widgetInputs: { parent: unknown; draft: unknown } | null;
       }>;
       ranking: string[];
@@ -357,6 +357,19 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
     expect(v21?.redLines.find((l) => l.key === 'parity')?.status).toBe('warn');
     expect(v21?.goalChecks[0]?.draft).toBe('ok');
     expect(v21?.goalChecks[0]?.months.filter((m) => m.draft)).toHaveLength(6);
+  });
+
+  it('scores against the newest goal of a type when the section already holds one', async () => {
+    // SCENARIO: the section's goal was «Solstice covers 6 months»; the user now asks Cedar to cover them (page sends both)
+    // INPUT: child v2.1 with the Cedar cover draws; goals [Solstice cover, Cedar cover], the new one last
+    // EXPECTED: one goal check, Cedar's, ok in 6 of 6 months; the old Solstice cover is not checked
+    const draws = (readJson('stage5/cover-cedar.body.json') as { draws: unknown[] }).draws;
+    const child = draft('v2.1', [], lineage({ steps: [{ type: 'cover', goal: COVER_GOAL, draws } as DraftLineage['steps'][number]] }), 'v2');
+    const solsticeCover = { ...COVER_GOAL, partnerId: 'solstice' };
+    const out = await score({ proposals: { variants: [child] }, parents: [{ id: 'v2', lineage: lineage({}) }], goals: [solsticeCover, COVER_GOAL] });
+    const checks = out.variants[0]?.goalChecks ?? [];
+    expect(checks.map((c) => [c.goal, c.draft])).toEqual([[COVER_GOAL, 'ok']]);
+    expect(checks[0]?.months.filter((m) => m.draft)).toHaveLength(6);
   });
 
   it('carries the widget inputs of the parent and the draft', async () => {
