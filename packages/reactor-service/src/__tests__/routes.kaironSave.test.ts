@@ -70,23 +70,23 @@ describe('POST /kairon/save', () => {
   it('refuses a lineage built on another active forecast without writing', async () => {
     // SCENARIO: Review Focus 2, the active forecast changed after the draft was built
     // INPUT: activePlanHash 'stale'
-    // EXPECTED: 409 with the Russian refusal; no write
+    // EXPECTED: 409 with the Russian refusal and stale: true, so the page offers no retry; no write
     const writes: WriteLog = [];
     const out = await save(server(writes), { name: 'x', lineage: lineage({ activePlanHash: 'stale' }) });
-    expect(out).toEqual({ status: 409, json: { error: 'Активный прогноз изменился, начните новый сценарий' } });
+    expect(out).toEqual({ status: 409, json: { error: 'Активный прогноз изменился, начните новый сценарий', stale: true } });
     expect(writes).toEqual([]);
   });
 
   it('refuses a draft when the active funding section was saved after the draft was built, without writing', async () => {
     // SCENARIO: DEV-1377, the active version's fundingRevision moved 0 → 1 after the card was scored; the plan is the same
     // INPUT: a lineage hashed on revision 0 (construction +8 %, U2 released); the API serves fundingRevision 1
-    // EXPECTED: 409 with the stale text; no write
+    // EXPECTED: 409 with the stale text and stale: true; no write
     const writes: WriteLog = [];
     const out = await save(server(writes, undefined, 1), {
       name: 'Стройка +8 %: v2',
       lineage: lineage({ scenario: CONSTRUCTION, leverPatch: { name: 'v2', set: releaseU2 } }),
     });
-    expect(out).toEqual({ status: 409, json: { error: 'Активный прогноз изменился, начните новый сценарий' } });
+    expect(out).toEqual({ status: 409, json: { error: 'Активный прогноз изменился, начните новый сценарий', stale: true } });
     expect(writes).toEqual([]);
   });
 

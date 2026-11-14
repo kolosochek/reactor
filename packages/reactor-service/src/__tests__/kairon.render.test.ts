@@ -328,12 +328,22 @@ describe('kairon render: save outcome', () => {
   });
 
   it('allows a retry when nothing was created', () => {
-    // SCENARIO: the save was refused before any write (a stale lineage, 409 without a versionId)
-    // INPUT: status 409, {error: 'Активный прогноз изменился, начните новый сценарий'}
+    // SCENARIO: Kairon refused the create itself, so no version exists and a second click may succeed
+    // INPUT: status 409, {error: 'Kairon ответил 409: A version with this name exists'}, no versionId, not stale
     // EXPECTED: «Не сохранено: …»; the button may be pressed again
-    expect(render.saveOutcome(409, { error: 'Активный прогноз изменился, начните новый сценарий' })).toEqual({
-      text: 'Не сохранено: Активный прогноз изменился, начните новый сценарий',
+    expect(render.saveOutcome(409, { error: 'Kairon ответил 409: A version with this name exists' })).toEqual({
+      text: 'Не сохранено: Kairon ответил 409: A version with this name exists',
       canRetry: true,
+    });
+  });
+
+  it('forbids a retry of a stale draft, which can never be saved', () => {
+    // SCENARIO: DEV-1377 review, the active forecast changed after the draft was built; every further click answers the same 409
+    // INPUT: status 409, {error: 'Активный прогноз изменился, начните новый сценарий', stale: true}
+    // EXPECTED: «Не сохранено: …» with the server's text, which already tells the user to start a new scenario; no retry
+    expect(render.saveOutcome(409, { error: 'Активный прогноз изменился, начните новый сценарий', stale: true })).toEqual({
+      text: 'Не сохранено: Активный прогноз изменился, начните новый сценарий',
+      canRetry: false,
     });
   });
 });

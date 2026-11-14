@@ -42,8 +42,10 @@ export function registerKaironSaveRoute(app: FastifyInstance, deps: KaironSaveDe
     const doc = await loadDocument(api, b);
     const replayed = replayLineage(doc, rulesOf(b), lineage);
     if (replayed.body === null) {
-      const stale = replayed.errors.includes(STALE_LINEAGE);
-      return reply.status(stale ? 409 : 422).send({ error: replayed.errors.join('; ') });
+      // `stale` tells the page that a second click cannot succeed: the draft was built on another active forecast.
+      const error = replayed.errors.join('; ');
+      if (replayed.errors.includes(STALE_LINEAGE)) return reply.status(409).send({ error, stale: true });
+      return reply.status(422).send({ error });
     }
     // The share target is a project setting in Kairon (settings.funding.shareTarget); a version cannot carry it,
     // so a saved version would differ from the scored card.

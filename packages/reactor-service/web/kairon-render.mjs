@@ -254,7 +254,8 @@ export function renderRejected(rejected) {
 /**
  * What the save row says after POST /kairon/save, and whether the button may be pressed again (DEV-1377).
  * Plain text for textContent. An error that carries a versionId means Kairon created the version and then
- * refused its draws: a second click would create a second version, so the button stays off.
+ * refused its draws: a second click would create a second version, so the button stays off. A stale draft
+ * (`stale: true`) can never be saved, so its button stays off too; the server's text names the way out.
  */
 export function saveOutcome(status, json) {
   const ok = status >= 200 && status < 300;
@@ -268,7 +269,7 @@ export function saveOutcome(status, json) {
   if (typeof json?.versionId === 'string' && json.versionId !== '') {
     return { text: `${error}. Повторное сохранение создаст вторую версию.`, canRetry: false };
   }
-  return { text: `Не сохранено: ${error}`, canRetry: true };
+  return { text: `Не сохранено: ${error}`, canRetry: json?.stale !== true };
 }
 
 /**
