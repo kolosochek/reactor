@@ -4,7 +4,8 @@
 // it is the active forecast plus its scenario, its lever patch and its goal
 // steps, and the server replays that on every message and on the save click.
 // The card and the saved Kairon version therefore come from the same body.
-// The lineage pins the active plan by hash: if the active forecast changed
+// The lineage pins the active forecast by hash: the plan, the version's funding
+// revision and the project's funding settings (DEV-1377). If any of them changed
 // between two messages, the replay refuses instead of scoring a different
 // base. Levers go through checkPatch again (bounds, closed months and its
 // monthRange adjustment); the scenario goes through applyScenario, outside
@@ -49,9 +50,18 @@ export function canonicalJson(value: unknown): string {
   );
 }
 
-/** sha256 of the plan as an evaluate body carries it: server-owned keys dropped, keys sorted. */
+/**
+ * sha256 of what a draft is built on: the plan as an evaluate body carries it (server-owned keys dropped),
+ * the active version's funding revision and the project's funding settings, keys sorted. A document without
+ * funding state reads as revision 0 and no settings.
+ */
 export function planHash(doc: ForecastDocument): string {
-  return createHash('sha256').update(canonicalJson(applyPatch(doc, { name: 'hash' }).plan)).digest('hex');
+  const state = {
+    plan: applyPatch(doc, { name: 'hash' }).plan,
+    fundingRevision: doc.fundingRevision ?? 0,
+    fundingSettings: doc.fundingSettings ?? null,
+  };
+  return createHash('sha256').update(canonicalJson(state)).digest('hex');
 }
 
 export function replayLineage(

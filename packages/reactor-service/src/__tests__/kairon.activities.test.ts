@@ -13,6 +13,7 @@ import {
   fakeKaironApi as fakeApi,
   fixtureDoc,
   readFixture as readJson,
+  RIVERGATE_FUNDING_SETTINGS,
   stage5Evaluate,
 } from './_helpers/kaironFake.js';
 
@@ -288,7 +289,8 @@ describe('kairon.buildGoalDrafts', () => {
 });
 
 describe('kairon.scoreVariants against parents (stage 5)', () => {
-  const HASH = planHash(fixtureDoc);
+  // The fake serves the partners here, so the drafts are built on the plan and those funding settings (DEV-1377).
+  const HASH = planHash({ ...fixtureDoc, fundingSettings: RIVERGATE_FUNDING_SETTINGS });
   const CONSTRUCTION = { type: 'cost_change' as const, lineCodes: ['D5', 'D8'], fromMonth: '2026-09', factorPpm: 1_080_000 };
   const releaseU2 = ['2026-11', '2027-06', '2028-01', '2028-06'].map((month) => ({ code: 'U2', month, amountMinor: '0' }));
   const r1 = (factorPpm: number) => ({ lineCodes: ['R1'], fromMonth: '2026-09', factorPpm });

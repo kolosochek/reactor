@@ -21,9 +21,9 @@ function lineage(over: Partial<DraftLineage>): DraftLineage {
   return { activePlanHash: HASH, scenario: { type: 'free' }, leverPatch: null, steps: [], ...over };
 }
 
-function server(writes: WriteLog, fundingStatus?: number) {
+function server(writes: WriteLog, fundingStatus?: number, fundingRevision?: number) {
   const app = Fastify({ logger: false });
-  registerKaironSaveRoute(app, { api: () => fakeKaironApi(baselineEvaluate, { writes, fundingStatus }) });
+  registerKaironSaveRoute(app, { api: () => fakeKaironApi(baselineEvaluate, { writes, fundingStatus, fundingRevision }) });
   return app;
 }
 
@@ -73,6 +73,19 @@ describe('POST /kairon/save', () => {
     // EXPECTED: 409 with the Russian refusal; no write
     const writes: WriteLog = [];
     const out = await save(server(writes), { name: 'x', lineage: lineage({ activePlanHash: 'stale' }) });
+    expect(out).toEqual({ status: 409, json: { error: 'Активный прогноз изменился, начните новый сценарий' } });
+    expect(writes).toEqual([]);
+  });
+
+  it('refuses a draft when the active funding section was saved after the draft was built, without writing', async () => {
+    // SCENARIO: DEV-1377, the active version's fundingRevision moved 0 → 1 after the card was scored; the plan is the same
+    // INPUT: a lineage hashed on revision 0 (construction +8 %, U2 released); the API serves fundingRevision 1
+    // EXPECTED: 409 with the stale text; no write
+    const writes: WriteLog = [];
+    const out = await save(server(writes, undefined, 1), {
+      name: 'Стройка +8 %: v2',
+      lineage: lineage({ scenario: CONSTRUCTION, leverPatch: { name: 'v2', set: releaseU2 } }),
+    });
     expect(out).toEqual({ status: 409, json: { error: 'Активный прогноз изменился, начните новый сценарий' } });
     expect(writes).toEqual([]);
   });

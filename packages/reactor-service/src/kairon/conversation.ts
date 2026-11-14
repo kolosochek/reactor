@@ -157,7 +157,7 @@ export async function structureScenario(
 ): Promise<{ spec: ScenarioSpec; errors: string[] }> {
   const input = StructureScenarioInput.parse(raw);
   const b = input.baseline;
-  const doc = await loadDocument(api, b.forecastVersion.id);
+  const doc = await loadDocument(api, b);
   const rules = { closedThrough: b.closedThrough, derivedLineCodes: b.derivedLineCodes };
   const codes = b.lines
     .filter((l) => Object.keys(l.openCells).length > 0 && !b.derivedLineCodes.includes(l.code))

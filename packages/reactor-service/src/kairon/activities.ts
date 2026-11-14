@@ -245,7 +245,7 @@ async function proposeVariants(api: KaironApi, raw: unknown, ctx: ActivityContex
     return { section: input.section, variants: [], rejected: [], openQuestions: [], attempts: [], model: '', errors: input.scenarioErrors };
   }
   const b = input.baseline;
-  const doc = await loadDocument(api, b.forecastVersion.id);
+  const doc = await loadDocument(api, b);
   const activePlanHash = planHash(doc);
   const spec = input.scenarioSpec;
   const lineageOf = (leverPatch: DraftLineage['leverPatch']): DraftLineage => ({ activePlanHash, scenario: spec, leverPatch, steps: [] });
@@ -325,7 +325,7 @@ function partnersOf(b: Baseline): Array<{ partnerId: string; name: string }> {
 async function buildGoalDrafts(api: KaironApi, raw: unknown, ctx: ActivityContext) {
   const input = GoalDraftsInput.parse(raw);
   const { baseline: b, goal } = input;
-  const doc = await loadDocument(api, b.forecastVersion.id);
+  const doc = await loadDocument(api, b);
   const rules = rulesOf(b);
   const name = (id: string) => partnersOf(b).find((p) => p.partnerId === id)?.name ?? id;
   const variants: DraftVariant[] = [];
@@ -545,7 +545,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
   const b = input.baseline;
   const currency = currencyOf(b);
   const rules = rulesOf(b);
-  const doc = await loadDocument(api, b.forecastVersion.id);
+  const doc = await loadDocument(api, b);
   const activePlanHash = planHash(doc);
   const activeRes = await api.evaluate(b.forecastVersion.id, {});
   if (activeRes.status !== 200) throw new Error(`Active forecast evaluate failed: ${activeRes.status}`);

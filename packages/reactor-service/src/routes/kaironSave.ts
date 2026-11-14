@@ -39,7 +39,7 @@ export function registerKaironSaveRoute(app: FastifyInstance, deps: KaironSaveDe
     const { name, lineage } = parsed.data;
     const api = deps.api();
     const b = await readBaseline(api);
-    const doc = await loadDocument(api, b.forecastVersion.id);
+    const doc = await loadDocument(api, b);
     const replayed = replayLineage(doc, rulesOf(b), lineage);
     if (replayed.body === null) {
       const stale = replayed.errors.includes(STALE_LINEAGE);

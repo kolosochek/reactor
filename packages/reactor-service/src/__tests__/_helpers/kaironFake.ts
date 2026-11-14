@@ -18,8 +18,8 @@ export function readFixture(path: string): unknown {
 
 export const fixtureDoc = readFixture('forecast-document.active.json') as ForecastDocument;
 
-function version(id: string, name: string, role: string, isActive: boolean, plan: ForecastPlan): KaironVersion {
-  return { id, name, role, isActive, payload: { lines: plan.lines, monthRange: plan.monthRange } };
+function version(id: string, name: string, role: string, isActive: boolean, plan: ForecastPlan, fundingRevision = 0): KaironVersion {
+  return { id, name, role, isActive, fundingRevision, payload: { lines: plan.lines, monthRange: plan.monthRange } };
 }
 
 export function readStage5(name: string): unknown {
@@ -40,12 +40,15 @@ export const RIVERGATE_PARTNERS = STAGE5_PROJECT.settings.funding.partners.map((
   sharePct: p.sharePct,
 }));
 
+/** settings.funding as the fake serves it with `partners: true`; part of the staleness hash (DEV-1377). */
+export const RIVERGATE_FUNDING_SETTINGS = STAGE5_PROJECT.settings.funding;
+
 /** Write calls the fake received, in order; a test that expects none passes no log and any write throws. */
 export type WriteLog = Array<{ op: 'createVersion' | 'putFunding'; args: unknown[] }>;
 
 export function fakeKaironApi(
   evaluate: (versionId: string, body: unknown) => HttpResult,
-  options: { partners?: boolean; writes?: WriteLog; fundingStatus?: number } = {},
+  options: { partners?: boolean; writes?: WriteLog; fundingStatus?: number; fundingRevision?: number } = {},
 ): KaironApi {
   const write = (op: WriteLog[number]['op'], args: unknown[]) => {
     if (options.writes === undefined) throw new Error(`unexpected Kairon write: ${op}`);
@@ -62,7 +65,7 @@ export function fakeKaironApi(
     pinnedVersionId: 'solstice-forecast-3',
     getProject: async () => (options.partners === true ? { ...project, settings: STAGE5_PROJECT.settings } : project),
     listVersions: async () => [
-      version('solstice-forecast-3', 'Forecast v3', 'forecast', true, fixtureDoc.plan),
+      version('solstice-forecast-3', 'Forecast v3', 'forecast', true, fixtureDoc.plan, options.fundingRevision ?? 0),
       version('d942a201-5349-46fd-9043-b697288460fe', 'Approved budget', 'approved', false, APPROVED_PLAN),
     ],
     getMilestones: async () => [

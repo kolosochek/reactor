@@ -52,7 +52,7 @@ describe('kairon traceKaironApi', () => {
     pinnedVersionId: 'v-f',
     getProject: async () => ({ id: 'p1', name: 'Rivergate', currentApprovedVersionId: 'v-a', currency: { code: 'CZK', decimals: 2 } }),
     listVersions: async () => [
-      { id: 'v-f', name: 'Forecast v3', role: 'forecast', isActive: true, payload: { lines: [], monthRange: { from: '2024-12', to: '2028-07' } } },
+      { id: 'v-f', name: 'Forecast v3', role: 'forecast', isActive: true, fundingRevision: 0, payload: { lines: [], monthRange: { from: '2024-12', to: '2028-07' } } },
     ],
     getMilestones: async () => [],
     evaluate: async () => ({ status: 422, json: { message: 'closed month' } }),

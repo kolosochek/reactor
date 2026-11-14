@@ -35,6 +35,8 @@ export interface Baseline {
   partners: PartnerShare[];
   /** The approved version's plan: what the diff view compares a draft against. */
   approvedPlan: ForecastPlan;
+  /** The project's settings.funding as served, null when it has none: part of the staleness hash (DEV-1377). */
+  fundingSettings: unknown;
 }
 
 const BoundaryShape = z.object({
@@ -70,10 +72,18 @@ export function pickForecastVersion(versions: KaironVersion[], pinnedId: string 
   return picked;
 }
 
-export async function loadDocument(api: KaironApi, versionId: string): Promise<ForecastDocument> {
-  const version = (await api.listVersions()).find((v) => v.id === versionId);
-  if (version === undefined) throw new Error(`Forecast version not found: ${versionId}`);
-  return { plan: planOf(version) };
+/**
+ * The active forecast as the drafts are built on it: its plan, plus what the staleness hash also covers,
+ * the version's funding revision (from the version list) and the project's funding settings (from the baseline,
+ * which already read the project).
+ */
+export async function loadDocument(
+  api: KaironApi,
+  b: Pick<Baseline, 'forecastVersion'> & Partial<Pick<Baseline, 'fundingSettings'>>,
+): Promise<ForecastDocument> {
+  const version = (await api.listVersions()).find((v) => v.id === b.forecastVersion.id);
+  if (version === undefined) throw new Error(`Forecast version not found: ${b.forecastVersion.id}`);
+  return { plan: planOf(version), fundingRevision: version.fundingRevision, fundingSettings: b.fundingSettings ?? null };
 }
 
 export async function readBaseline(api: KaironApi): Promise<Baseline> {
@@ -116,5 +126,6 @@ export async function readBaseline(api: KaironApi): Promise<Baseline> {
       sharePct: p.sharePct,
     })),
     approvedPlan: planOf(approved),
+    fundingSettings: project.settings?.funding ?? null,
   };
 }

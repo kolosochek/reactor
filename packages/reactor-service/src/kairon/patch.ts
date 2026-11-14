@@ -61,6 +61,9 @@ export interface ForecastPlan {
 
 export interface ForecastDocument {
   plan: ForecastPlan;
+  /** The version's funding revision and the project's settings.funding, as loadDocument reads them: staleness state only. */
+  fundingRevision?: number;
+  fundingSettings?: unknown;
   [key: string]: unknown;
 }
 

@@ -121,6 +121,43 @@ describe('kairon replayLineage', () => {
   });
 });
 
+describe('kairon staleness beyond the plan', () => {
+  const shares = (solstice: number, cedar: number) => ({
+    partners: [
+      { id: 'solstice', name: 'Solstice Sponsor', sharePct: solstice },
+      { id: 'cedar', name: 'Cedar Partners', sharePct: cedar },
+    ],
+  });
+  const state: ForecastDocument = { ...fixtureDoc, fundingRevision: 3, fundingSettings: shares(0.3, 0.7) };
+  const STALE = { body: null, errors: ['Активный прогноз изменился, начните новый сценарий'] };
+
+  it('refuses a lineage when the funding section of the active version was saved since', () => {
+    // SCENARIO: DEV-1377, someone saved the active version's draws between two messages; the plan did not change
+    // INPUT: a lineage hashed on fundingRevision 3; replay on revision 4, then on revision 3
+    // EXPECTED: stale on 4; replayed without errors on 3
+    const built = lineage({ activePlanHash: planHash(state) });
+    expect(replayLineage({ ...state, fundingRevision: 4 }, RULES, built)).toEqual(STALE);
+    expect(replayLineage(state, RULES, built).errors).toEqual([]);
+  });
+
+  it('refuses a lineage when the project funding settings changed since', () => {
+    // SCENARIO: DEV-1377, the partners' agreed shares moved from 30 / 70 to 40 / 60 between two messages
+    // INPUT: a lineage hashed on shares 0.3 / 0.7; replay on 0.4 / 0.6; then on 0.3 / 0.7 with the keys in another order
+    // EXPECTED: stale on the changed shares; key order alone does not make it stale
+    const built = lineage({ activePlanHash: planHash(state) });
+    expect(replayLineage({ ...state, fundingSettings: shares(0.4, 0.6) }, RULES, built)).toEqual(STALE);
+    const reordered = { partners: shares(0.3, 0.7).partners.map((p) => ({ sharePct: p.sharePct, name: p.name, id: p.id })) };
+    expect(replayLineage({ ...state, fundingSettings: reordered }, RULES, built).errors).toEqual([]);
+  });
+
+  it('reads a document without funding state as revision 0 and no settings', () => {
+    // SCENARIO: the recorded stage 4 document carries only the plan
+    // INPUT: fixtureDoc; the same with fundingRevision 0 and fundingSettings null
+    // EXPECTED: the same hash
+    expect(planHash({ ...fixtureDoc, fundingRevision: 0, fundingSettings: null })).toBe(HASH);
+  });
+});
+
 describe('kairon childId', () => {
   it('numbers children under the root draft', () => {
     // SCENARIO: goals on v2, then on its child

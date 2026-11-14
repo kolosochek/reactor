@@ -55,10 +55,12 @@ const ProjectShape = z.object({
   currency: z.object({ code: z.string(), decimals: z.number().int() }),
   settings: z
     .object({
+      // Every key is kept: the whole funding settings object is part of the staleness hash (DEV-1377).
       funding: z
         .object({
-          partners: z.array(z.object({ id: z.string(), name: z.string(), sharePct: z.number() })).optional(),
+          partners: z.array(z.object({ id: z.string(), name: z.string(), sharePct: z.number() }).passthrough()).optional(),
         })
+        .passthrough()
         .optional(),
     })
     .optional(),
@@ -69,6 +71,8 @@ const VersionShape = z.object({
   name: z.string(),
   role: z.string(),
   isActive: z.boolean(),
+  /** Moves on every save of the version's funding section; the version list serves it with the other scalar columns. */
+  fundingRevision: z.number().int(),
   payload: z.object({
     lines: z.array(
       z
