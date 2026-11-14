@@ -251,6 +251,26 @@ export function renderRejected(rejected) {
   return `<div class="k-rejected"><div class="k-part">Сервер отклонил</div><ul>${items.join('')}</ul></div>`;
 }
 
+/**
+ * What the save row says after POST /kairon/save, and whether the button may be pressed again (DEV-1377).
+ * Plain text for textContent. An error that carries a versionId means Kairon created the version and then
+ * refused its draws: a second click would create a second version, so the button stays off.
+ */
+export function saveOutcome(status, json) {
+  const ok = status >= 200 && status < 300;
+  if (ok) {
+    return {
+      text: `Создан черновик «${json?.name ?? ''}» (${json?.versionId ?? ''}). Версия не активна: активировать её можно только в Kairon.`,
+      canRetry: false,
+    };
+  }
+  const error = json?.error ?? `HTTP ${status}`;
+  if (typeof json?.versionId === 'string' && json.versionId !== '') {
+    return { text: `${error}. Повторное сохранение создаст вторую версию.`, canRetry: false };
+  }
+  return { text: `Не сохранено: ${error}`, canRetry: true };
+}
+
 export function renderOverview(explanation, scored) {
   const titleOf = (id) => scored.variants.find((v) => v.id === id)?.title ?? '';
   const rec = explanation.recommendation ?? '';

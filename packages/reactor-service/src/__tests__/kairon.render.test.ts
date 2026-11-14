@@ -23,6 +23,7 @@ interface RenderModule {
   renderRejected(rejected: unknown): string;
   renderWidget(spec: unknown, scoredVariant: unknown, parentEval: unknown, draftEval: unknown): string;
   renderDiffView(diffView: unknown, currency?: unknown): string;
+  saveOutcome(status: number, json: unknown): { text: string; canRetry: boolean };
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -300,5 +301,37 @@ describe('kairon render: diff view copy', () => {
     expect(html).toContain('<div class="c">Затраты к базе</div><div class="n">53,7 млн CZK</div><div class="d">перерасход</div>');
     expect(html).toContain('<div class="c">Не покрыто финансированием</div><div class="n">0,0 млн CZK</div><div class="d">в родителе 0,0 млн CZK</div>');
     expect(html).toContain('<td>D5</td><td>Construction - new build</td>');
+  });
+});
+
+describe('kairon render: save outcome', () => {
+  it('names the created draft and says it is not active', () => {
+    // SCENARIO: «Сохранить как черновик» answered 200 (DEV-1377)
+    // INPUT: status 200, {versionId: 'ver-1', name: 'S2 · v1'}
+    // EXPECTED: the created text with the name and the id; no retry
+    expect(render.saveOutcome(200, { versionId: 'ver-1', name: 'S2 · v1' })).toEqual({
+      text: 'Создан черновик «S2 · v1» (ver-1). Версия не активна: активировать её можно только в Kairon.',
+      canRetry: false,
+    });
+  });
+
+  it('forbids a retry when the version was created without its draws', () => {
+    // SCENARIO: Kairon created the version and then refused the funding PUT; a second click would create a second version
+    // INPUT: status 409 with the error and the versionId of the half-saved draft
+    // EXPECTED: the server text plus the warning about a second version; no retry
+    expect(render.saveOutcome(409, { error: 'Черновик ver-1 создан без траншей: Kairon ответил 409: revision', versionId: 'ver-1' })).toEqual({
+      text: 'Черновик ver-1 создан без траншей: Kairon ответил 409: revision. Повторное сохранение создаст вторую версию.',
+      canRetry: false,
+    });
+  });
+
+  it('allows a retry when nothing was created', () => {
+    // SCENARIO: the save was refused before any write (a stale lineage, 409 without a versionId)
+    // INPUT: status 409, {error: 'Активный прогноз изменился, начните новый сценарий'}
+    // EXPECTED: «Не сохранено: …»; the button may be pressed again
+    expect(render.saveOutcome(409, { error: 'Активный прогноз изменился, начните новый сценарий' })).toEqual({
+      text: 'Не сохранено: Активный прогноз изменился, начните новый сценарий',
+      canRetry: true,
+    });
   });
 });

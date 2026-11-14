@@ -1411,8 +1411,9 @@ svg text { font-size: 11px; }
       try {
         const r = await fetch(API + '/kairon/save', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: name.value, lineage: v.lineage }) });
         const j = await r.json();
-        if (r.ok) note.textContent = 'Создан черновик «' + j.name + '» (' + j.versionId + '). Версия не активна: активировать её можно только в Kairon.';
-        else { note.textContent = 'Не сохранено: ' + j.error; btn.disabled = false; }
+        const outcome = R.saveOutcome(r.status, j);
+        note.textContent = outcome.text;
+        btn.disabled = !outcome.canRetry;
       } catch (err) { note.textContent = String(err); btn.disabled = false; }
     });
     return el('div', { class: 'save-row' }, [name, btn, note]);
