@@ -32,6 +32,11 @@ export interface DraftScore {
   reserveLeftMinor: string;
   addedBreaches: number;
   goalsMet: boolean;
+  /**
+   * The draft's own profit target when a net_profit_target goal ranks: its parent's net profit plus the
+   * amount for a delta goal, the amount for an absolute one. null falls back to the goal's targetMinor.
+   */
+  profitTargetMinor: string | null;
 }
 
 export interface CriteriaRow {
@@ -55,6 +60,11 @@ function partnerCashDelta(d: DraftScore): bigint {
 
 const cmpBig = (a: bigint, b: bigint) => (a < b ? -1 : a > b ? 1 : 0);
 
+/** Net profit over the draft's own target; children of different parents carry different targets. */
+function overTarget(d: DraftScore, fallbackTargetMinor: string): bigint {
+  return BigInt(d.metrics.netProfitMinor) - BigInt(d.profitTargetMinor ?? fallbackTargetMinor);
+}
+
 function promisedFor(approved: EvaluationMetrics, partnerIds: string[] | null): PartnerIrr[] {
   return approved.partners.filter((p) => partnerIds === null || partnerIds.includes(p.partnerId));
 }
@@ -69,9 +79,9 @@ function goalCompare(goal: RankGoal, approved: EvaluationMetrics): (a: DraftScor
         distance(promised, a.metrics) - distance(promised, b.metrics);
     }
     case 'net_profit_target': {
-      const target = BigInt(goal.targetMinor);
-      const below = (d: DraftScore) => (net(d) < target ? 1 : 0);
-      const gap = (d: DraftScore) => (net(d) < target ? target - net(d) : net(d) - target);
+      const over = (d: DraftScore) => overTarget(d, goal.targetMinor);
+      const below = (d: DraftScore) => (over(d) < 0n ? 1 : 0);
+      const gap = (d: DraftScore) => (over(d) < 0n ? -over(d) : over(d));
       return (a, b) => below(a) - below(b) || cmpBig(gap(a), gap(b));
     }
     case 'max_net_profit':
@@ -199,8 +209,7 @@ export function criteriaMatrix(
     }
   }
   if (goal.type === 'net_profit_target') {
-    const target = BigInt(goal.targetMinor);
-    const over = (d: DraftScore) => BigInt(d.metrics.netProfitMinor) - target;
+    const over = (d: DraftScore) => overTarget(d, goal.targetMinor);
     rows.push({
       step: 2,
       label: 'Чистая прибыль к цели',

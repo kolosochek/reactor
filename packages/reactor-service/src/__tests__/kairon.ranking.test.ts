@@ -30,6 +30,7 @@ function score(id: string, leverCount: number, touchesReserve: boolean): DraftSc
     reserveLeftMinor: touchesReserve ? '0' : U2_OPEN,
     addedBreaches: 0,
     goalsMet: true,
+    profitTargetMinor: null,
   };
 }
 
@@ -61,6 +62,17 @@ describe('kairon rankDrafts', () => {
       'v2',
       'v1',
     ]);
+  });
+
+  it('ranks each draft against its own profit target', () => {
+    // SCENARIO: DEV-1377, «+N к прибыли» over children of two parents: each child's target is its own parent's profit plus N
+    // INPUT: v1 (333,4 млн) with its own target 330,0; v3 (384,5 млн) with its own target 387,65; the goal's fallback target 385,0
+    // EXPECTED: v1 first: it is at its target, v3 is below its own. Against the one fallback target v3 would lead
+    const drafts = [
+      { ...score('v1', 1, false), profitTargetMinor: '33000000000' },
+      { ...score('v3', 1, false), profitTargetMinor: '38765000000' },
+    ];
+    expect(rankDrafts(drafts, approved, { type: 'net_profit_target', targetMinor: '38500000000' }).ranking).toEqual(['v1', 'v3']);
   });
 
   it('ranks a stage 4 batch exactly as rankVariants does', () => {
@@ -148,5 +160,18 @@ describe('kairon criteriaMatrix', () => {
       [null, 'Партнёры вносят дополнительно', ['+44,6 млн CZK', '+34,4 млн CZK', '+39,7 млн CZK', '+30,7 млн CZK'], 'v4'],
       [null, 'Резерв после решения', ['14,4 млн CZK', '0,0 млн CZK', '14,4 млн CZK', '0,0 млн CZK'], 'v1'],
     ]);
+  });
+
+  it('shows each draft against its own profit target', () => {
+    // SCENARIO: DEV-1377, the «Чистая прибыль к цели» row when drafts carry different targets
+    // INPUT: v1 with target 330,0 млн, v3 with target 387,65 млн; fallback target 385,0 млн
+    // EXPECTED: v1 +3,4 млн, v3 -3,1 млн; v1 is the best: the only one at or above its target
+    const drafts = [
+      { ...score('v1', 1, false), profitTargetMinor: '33000000000' },
+      { ...score('v3', 1, false), profitTargetMinor: '38765000000' },
+    ];
+    const rows = criteriaMatrix(drafts, approved, {}, CZK, { type: 'net_profit_target', targetMinor: '38500000000' });
+    const row = rows.find((r) => r.label === 'Чистая прибыль к цели');
+    expect([row?.step, row?.values, row?.best]).toEqual([2, { v1: '+3,4 млн CZK', v3: '-3,1 млн CZK' }, 'v1']);
   });
 });

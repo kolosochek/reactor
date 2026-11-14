@@ -657,6 +657,11 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
     dropped.push(...sameAsEarlier(group.map((v) => ({ id: v.id, metrics: v.metrics })), parentOf(first).metrics));
   }
   const droppedIds = new Set(dropped.map((d) => d.id));
+  // A delta profit target is the draft's own parent's profit plus the amount, as the goal check reads it.
+  const ownProfitTarget = (v: ScoredVariant): string | null => {
+    const own = rankGoalOf(input.goals, parentOf(v).metrics.netProfitMinor);
+    return own.type === 'net_profit_target' ? own.targetMinor : null;
+  };
   const scores: DraftScore[] = okVariants
     .filter((v) => !droppedIds.has(v.id))
     .map((v) => ({
@@ -668,6 +673,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
       reserveLeftMinor: v.reserveLeftMinor,
       addedBreaches: v.redLines.filter((l) => l.status === 'breach' && l.baseStatus !== 'breach').length,
       goalsMet: v.goalChecks.every((c) => c.draft === 'ok'),
+      profitTargetMinor: ownProfitTarget(v),
     }));
   const firstParent = input.parents[0];
   const rankBase = (firstParent === undefined ? undefined : parents.get(firstParent.id)) ?? activeSide;

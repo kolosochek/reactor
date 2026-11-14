@@ -429,6 +429,28 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
     expect(out.answers).toEqual([{ parentId: 'v1', text: 'Цель недостижима рычагами в пределах ±3 %: ближе всего v1.1' }]);
   });
 
+  it('ranks the children of two parents each against its own delta target', async () => {
+    // SCENARIO: DEV-1377, «+35 млн к прибыли» on S2 v1 (333,4 млн) and S2 v2 (347,9 млн)
+    // INPUT: v1.1 = v1 + R1 × 1.03 (384,5 млн, target 368,4); v2.1 = v2 + R1 × 1.023 (387,0 млн, target 382,9)
+    // EXPECTED: both meet their goal; v2.1 leads, 4,2 млн over its target against 16,1 for v1.1.
+    //           Against v1's target for both, v1.1 would lead (16,1 against 18,6)
+    const goal = { type: 'net_profit_target' as const, amountMinor: '3500000000', basis: 'delta' as const };
+    const step = (id: string, factorPpm: number) => ({ type: 'levers' as const, goal, patch: { name: id, scale: [r1(factorPpm)] } });
+    const v1 = S2[0]?.lineage;
+    const v2 = S2[1]?.lineage;
+    const children = [
+      draft('v1.1', ['цены'], lineage({ scenario: CONSTRUCTION, steps: [step('v1.1', 1_030_000)] }), 'v1'),
+      draft('v2.1', ['цены'], lineage({ scenario: CONSTRUCTION, leverPatch: { name: 'v2', set: releaseU2 }, steps: [step('v2.1', 1_023_000)] }), 'v2'),
+    ];
+    const out = await score({
+      proposals: { variants: children, answers: [] },
+      parents: [{ id: 'v1', lineage: v1 }, { id: 'v2', lineage: v2 }],
+      goals: [goal],
+    });
+    expect(out.variants.map((v) => [v.id, v.status, v.goalChecks[0]?.draft])).toEqual([['v1.1', 'ok', 'ok'], ['v2.1', 'ok', 'ok']]);
+    expect(out.ranking).toEqual(['v2.1', 'v1.1']);
+  });
+
   it('names only a ranked draft as the closest one', async () => {
     // SCENARIO: DEV-1377, two children of S2 v1 with the same lever miss «+100 млн»; v1.2 equals v1.1 and is dropped before ranking
     // INPUT: v1.1 and v1.2 = v1 + R1 × 1 030 000, both with the net_profit_target step
