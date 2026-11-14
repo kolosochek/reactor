@@ -40,7 +40,7 @@ async function evaluate(versionId: string, body: unknown): Promise<unknown> {
 
 mkdirSync(OUT, { recursive: true });
 const b = await readBaseline(api);
-const doc = await loadDocument(api, b.forecastVersion.id);
+const doc = await loadDocument(api, b);
 const fixturePlan = (JSON.parse(readFileSync(FIXTURE_DOC, 'utf8')) as { plan: unknown }).plan;
 const livePlan = applyPatch(doc, { name: 'noop' }).plan;
 const fixtureBody = applyPatch({ plan: fixturePlan as typeof doc.plan }, { name: 'noop' }).plan;
