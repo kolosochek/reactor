@@ -295,6 +295,27 @@ describe('kairon.buildGoalDrafts', () => {
     });
   });
 
+  it('refuses a cover window that starts in a closed month and drafts nothing', async () => {
+    // SCENARIO: DEV-1377 (Review Focus 4), «Cedar покрывает 6 месяцев с июля 2026» while months through 2026-08 are closed
+    // INPUT: funding_cover cedar 2026-07 × 6; parent v2 = the active forecast unchanged
+    // EXPECTED: no LLM call; no draft, no answer; the child v2.1 rejected, naming 2026-07
+    const b = await loadBaseline();
+    const llm = scriptedLlm([]);
+    const goal = { type: 'funding_cover' as const, partnerId: 'cedar', fromMonth: '2026-07', months: 6 };
+    const out = await createKaironActivities(fakeApi(stage5Evaluate))['kairon.buildGoalDrafts'](
+      { baseline: { ...b, partners: RIVERGATE }, goal, parents: [ACTIVE_PARENT], existingIds: ['v1', 'v2', 'v3'] },
+      ctxWith(llm),
+    );
+    expect(llm.complete).toHaveBeenCalledTimes(0);
+    expect(out).toEqual({
+      variants: [],
+      answers: [],
+      rejected: [{ id: 'v2.1', title: 'Cedar Partners покрывает всю потребность 6 мес. с 2026-07', errors: ['2026-07: closed through 2026-08'] }],
+      attempts: [],
+      model: '',
+    });
+  });
+
   it('answers that no draft was built when every lever for the goal is refused', async () => {
     // SCENARIO: DEV-1377, «+100 млн чистой прибыли» on S2 v1; the LLM answers R1 × 1.05 three times, outside the ±3 % bound
     // INPUT: net_profit_target delta 10 000 000 000 minor; 3 replies with scale R1 × 1 050 000 as v1.1
