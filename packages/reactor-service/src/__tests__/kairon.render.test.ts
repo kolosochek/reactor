@@ -24,6 +24,7 @@ interface RenderModule {
   renderWidget(spec: unknown, scoredVariant: unknown, parentEval: unknown, draftEval: unknown): string;
   renderDiffView(diffView: unknown, currency?: unknown): string;
   saveOutcome(status: number, json: unknown): { text: string; canRetry: boolean };
+  renderRouteNote(route: unknown): string;
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -333,5 +334,17 @@ describe('kairon render: save outcome', () => {
       text: 'Не сохранено: Активный прогноз изменился, начните новый сценарий',
       canRetry: true,
     });
+  });
+});
+
+describe('kairon render: route note', () => {
+  it('says above the answer that the route was not parsed, escaped', () => {
+    // SCENARIO: DEV-1377, the router failed twice and fell back to a question; the user must see why the answer is a question's
+    // INPUT: a route with the error «scope: unknown draft <v5>; known: v1, all»; then a route without an error
+    // EXPECTED: one note with the error escaped and the fallback named; '' when the route has no error
+    expect(render.renderRouteNote({ kind: 'question', scope: [], error: 'scope: unknown draft <v5>; known: v1, all' })).toBe(
+      '<div class="k-route-note">Маршрут не разобран: scope: unknown draft &lt;v5&gt;; known: v1, all. Ответ дан как на вопрос.</div>',
+    );
+    expect(render.renderRouteNote({ kind: 'goal_change', scope: ['v2'], error: null })).toBe('');
   });
 });

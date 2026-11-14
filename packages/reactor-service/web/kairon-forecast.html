@@ -1537,6 +1537,8 @@ svg text { font-size: 11px; }
     session.record.push({ message: text, step: 'route', run: run1 });
     const route = run1.solution && run1.solution.output.route;
     if (!route) { badge.textContent = 'маршрут не получен'; result.appendChild(errbox('Маршрут не получен: ' + (run1.failure || 'нет ответа'))); return; }
+    const routeNote = R.renderRouteNote(route);
+    if (routeNote) result.appendChild(htmlBlock('', routeNote));
     const plan = planFor(route, text, section);
     badge.textContent = KIND_WORDS[plan.kind] + (plan.scopeText ? ' · ' + plan.scopeText : '');
     const planRow = makeRow('План', 'page', route);

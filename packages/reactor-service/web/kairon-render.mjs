@@ -271,6 +271,16 @@ export function saveOutcome(status, json) {
   return { text: `Не сохранено: ${error}`, canRetry: true };
 }
 
+/**
+ * A note above the answer when the router could not parse the message and fell back to a question (DEV-1377).
+ * Without it the fallback shows only in the ribbon summary; '' when the route has no error.
+ */
+export function renderRouteNote(route) {
+  const error = route?.error ?? '';
+  if (error === '') return '';
+  return `<div class="k-route-note">Маршрут не разобран: ${esc(error)}. Ответ дан как на вопрос.</div>`;
+}
+
 export function renderOverview(explanation, scored) {
   const titleOf = (id) => scored.variants.find((v) => v.id === id)?.title ?? '';
   const rec = explanation.recommendation ?? '';
@@ -588,6 +598,7 @@ table.k-m td.best { font-weight: 700; }
 .k-not { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; }
 .k-switch { display: flex; flex-wrap: wrap; gap: 6px; }
 .k-rejected { border-left: 3px solid #d03b3b; padding: 4px 10px; margin: 6px 0; font-size: 13px; } .k-rejected ul { margin: 2px 0 0; padding-left: 18px; }
+.k-route-note { border-left: 3px solid #b26a00; padding: 4px 10px; margin: 6px 0; font-size: 13px; }
 .k-switch-btn { border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; background: var(--bg-primary); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
 .k-tiles4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .k-tile { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; background: var(--bg-primary); }
