@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { Activity, ActivityContext, LLMCompletionRequest } from '@kolosochek/reactor-core';
 import { digestLines, loadDocument, readBaseline, type Baseline } from './baseline.js';
-import { checkPatch, patchLineCodes, type PatchRules } from './checks.js';
+import { checkPatch, patchLineCodes, patchOpCount, type PatchRules } from './checks.js';
 import type { KaironApi } from './client.js';
 import { route, RouteInput, StructureGoalInput, structureGoal, StructureScenarioInput, structureScenario } from './conversation.js';
 import { diffVariant, REVENUE_GROUP_CODES, type VariantDiff } from './diff.js';
@@ -511,6 +511,16 @@ function askedOf(lineage: DraftLineage, isChild: boolean): { lines: string[]; so
   return { lines: [...new Set([...scenarioLines, ...leverLines])], sources: [] };
 }
 
+/**
+ * The levers of the draft's own step, counted by the server: the ops of its last lever patch. A draft the
+ * server built from the scenario alone and a cover draft have none. The LLM's `levers` list is display text.
+ */
+function ownLeverCount(lineage: DraftLineage): number {
+  const last = lineage.steps.at(-1);
+  const patch = last === undefined ? lineage.leverPatch : last.type === 'levers' ? last.patch : null;
+  return patch === null ? 0 : patchOpCount(patch);
+}
+
 const RULE_RED_LINES = 'Красные линии отсекают варианты: отсекает только нарушение, которое добавил сам вариант.';
 const RULE_LEVERS = 'При равенстве выигрывает вариант с меньшим числом рычагов.';
 const UNREACHABLE = 'Цель недостижима рычагами в пределах ±3 %:';
@@ -668,7 +678,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
       id: v.id,
       metrics: v.metrics,
       parentMetrics: parentOf(v).metrics,
-      leverCount: v.levers.length,
+      leverCount: ownLeverCount(v.lineage),
       touchesReserve: v.touchesReserve,
       reserveLeftMinor: v.reserveLeftMinor,
       addedBreaches: v.redLines.filter((l) => l.status === 'breach' && l.baseStatus !== 'breach').length,

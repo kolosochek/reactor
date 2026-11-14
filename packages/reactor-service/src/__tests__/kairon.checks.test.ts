@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { checkPatch, runningCost } from '../kairon/checks.js';
+import { checkPatch, patchOpCount, runningCost } from '../kairon/checks.js';
 import { ForecastPatchSchema, type ForecastDocument } from '../kairon/patch.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'kairon');
@@ -202,5 +202,31 @@ describe('kairon runningCost', () => {
     const cells = (code: string) => doc.plan.lines.find((l) => l.code === code)?.monthlyForecast ?? {};
     expect(runningCost(cells('O5'))).toEqual({ monthlyMinor: '-84174990', lastMonth: '2028-03' });
     expect([runningCost(cells('R4')), runningCost(cells('F2')), runningCost(cells('U2'))]).toEqual([null, null, null]);
+  });
+});
+
+describe('kairon patchOpCount', () => {
+  it('counts every op entry, the month range and the share target', () => {
+    // SCENARIO: DEV-1377, the lever count of a draft is the size of its own lever patch
+    // INPUT: 1 stretch, 2 shifts, 1 extend, 1 scale, 2 set cells, monthRangeTo and shareTarget; then a patch with a name only
+    // EXPECTED: 9; 0
+    const patch = ForecastPatchSchema.parse({
+      name: 'v2',
+      stretch: [{ lineCodes: ['D5'], fromMonth: '2026-09', byMonths: 3 }],
+      shift: [
+        { lineCodes: ['R1'], fromMonth: '2026-09', byMonths: 3 },
+        { lineCodes: ['R2'], fromMonth: '2026-09', byMonths: 3 },
+      ],
+      extend: [{ lineCodes: ['O3'], months: 3 }],
+      scale: [{ lineCodes: ['R1'], fromMonth: '2026-09', factorPpm: 1_030_000 }],
+      set: [
+        { code: 'U2', month: '2026-11', amountMinor: '0' },
+        { code: 'U2', month: '2027-06', amountMinor: '0' },
+      ],
+      monthRangeTo: '2028-10',
+      shareTarget: { equityShareBp: 6000 },
+    });
+    expect(patchOpCount(patch)).toBe(9);
+    expect(patchOpCount({ name: 'v1' })).toBe(0);
   });
 });

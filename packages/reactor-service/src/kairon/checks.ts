@@ -45,6 +45,12 @@ export function patchLineCodes(patch: ForecastPatch): string[] {
   return [...codes];
 }
 
+/** The size of a lever patch: one per op entry, one for a month range, one for a share target. */
+export function patchOpCount(patch: ForecastPatch): number {
+  const entries = [patch.stretch, patch.shift, patch.extend, patch.scale, patch.set].reduce((n, ops) => n + (ops?.length ?? 0), 0);
+  return entries + (patch.monthRangeTo === undefined ? 0 : 1) + (patch.shareTarget === undefined ? 0 : 1);
+}
+
 function boundErrors(patch: ForecastPatch): string[] {
   const errors: string[] = [];
   for (const op of patch.scale ?? []) {

@@ -320,6 +320,7 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
       rules: string[];
       answers: Array<{ parentId: string; text: string }>;
       facts: Record<string, string>;
+      matrix: Array<{ label: string; values: Record<string, string> }>;
     };
   }
 
@@ -427,6 +428,28 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
     const out = await score({ proposals: { variants: [child], answers: [] }, parents: [{ id: 'v1', lineage: S2[0]?.lineage }], goals: [goal] });
     expect(out.variants[0]?.goalChecks[0]?.draft).toBe('breach');
     expect(out.answers).toEqual([{ parentId: 'v1', text: 'Цель недостижима рычагами в пределах ±3 %: ближе всего v1.1' }]);
+  });
+
+  it('counts the ops of the draft\'s own lever patch, whatever levers the LLM names', async () => {
+    // SCENARIO: DEV-1377, the «Рычаги» row and the fewer-levers tie-break must not depend on the LLM's `levers` list
+    // INPUT: S2 v1 (server-built), v2 (4 set cells, 1 name), v3 (1 scale, 1 name), v4 (1 scale + 4 set, 2 names);
+    //        then child v1.1 = v1 + 1 scale with 3 names, and the cover child v2.1 of the active forecast
+    // EXPECTED: «Рычаги» нет, 4, 1, 5 for S2; 1 for v1.1; нет for the cover draft
+    const leversRow = (out: Awaited<ReturnType<typeof score>>) => out.matrix.find((r) => r.label === 'Рычаги')?.values;
+    expect(leversRow(await score({ proposals: { variants: S2 }, parents: [], goals: [] }))).toEqual({ v1: 'нет', v2: '4', v3: '1', v4: '5' });
+
+    const goal = { type: 'net_profit_target' as const, amountMinor: '1000000000', basis: 'delta' as const };
+    const named3 = draft(
+      'v1.1',
+      ['цены', 'индексация', 'спрос'],
+      lineage({ scenario: CONSTRUCTION, steps: [{ type: 'levers', goal, patch: { name: 'v1.1', scale: [r1(1_030_000)] } }] }),
+      'v1',
+    );
+    expect(leversRow(await score({ proposals: { variants: [named3] }, parents: [{ id: 'v1', lineage: S2[0]?.lineage }], goals: [goal] }))).toEqual({ 'v1.1': '1' });
+
+    const draws = (readJson('stage5/cover-cedar.body.json') as { draws: unknown[] }).draws;
+    const cover = draft('v2.1', ['покрытие'], lineage({ steps: [{ type: 'cover', goal: COVER_GOAL, draws } as DraftLineage['steps'][number]] }), 'v2');
+    expect(leversRow(await score({ proposals: { variants: [cover] }, parents: [{ id: 'v2', lineage: lineage({}) }], goals: [COVER_GOAL] }))).toEqual({ 'v2.1': 'нет' });
   });
 
   it('ranks the children of two parents each against its own delta target', async () => {
