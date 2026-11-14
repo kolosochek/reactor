@@ -75,6 +75,23 @@ describe('kairon checkGoals', () => {
     expect(row?.months.filter((m) => m.draft).length).toBe(6);
   });
 
+  it('fails a cover month in which the bank draws', () => {
+    // SCENARIO: DEV-1377, «все затраты покрывает Cedar»: a bank draw in the window means Cedar does not cover everything
+    // INPUT: the cover goal; draft = cover-cedar.eval plus a bank draw of 1 000,00 CZK in 2026-11
+    // EXPECTED: draft breach; ok in 5 of 6 months, 2026-11 is the one that fails
+    const draft = structuredClone(readStage5('cover-cedar.eval.json')) as { draws: Array<Record<string, string>> };
+    draft.draws.push({ sourceId: 'da6b7d98-53b3-41e9-b554-06ba4064df94', period: '2026-11-01', amountMinor: '100000', provenance: 'pinned' });
+    const [row] = checkGoals([cover('2026-09', 6)], {
+      approved,
+      parentEval: active,
+      draftEval: draft,
+      parentNetProfitMinor: '38716351362',
+      currency: CZK,
+    });
+    expect(row?.draft).toBe('breach');
+    expect(row?.months.filter((m) => !m.draft).map((m) => m.month)).toEqual(['2026-11']);
+  });
+
   it('checks the IRR floor and the net profit target against the parent and the draft', () => {
     // SCENARIO: construction +8 % (s2-v1) against the active forecast
     // INPUT: irr_floor ['solstice']; net_profit_target absolute 380 млн

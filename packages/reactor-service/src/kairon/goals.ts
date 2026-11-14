@@ -99,23 +99,30 @@ export function fundingCoverDraws(
   };
 }
 
-/** Draw total per partner id for one month; the bank is left out. */
-function partnerDraws(funding: Funding, month: string): Map<string, bigint> {
-  const partnerOf = new Map(funding.sourceGroups.flatMap((g) => (g.partnerId === undefined ? [] : [[g.sourceId, g.partnerId]])));
+/** Draw total per source id for one month: the partners' sources and the bank's. */
+function sourceDraws(funding: Funding, month: string): Map<string, bigint> {
   const totals = new Map<string, bigint>();
   for (const d of funding.draws) {
-    const partnerId = partnerOf.get(d.sourceId);
-    if (partnerId === undefined || d.period.slice(0, 7) !== month) continue;
-    totals.set(partnerId, (totals.get(partnerId) ?? 0n) + BigInt(d.amountMinor));
+    if (d.period.slice(0, 7) !== month) continue;
+    totals.set(d.sourceId, (totals.get(d.sourceId) ?? 0n) + BigInt(d.amountMinor));
   }
   return totals;
 }
 
+/**
+ * The named partner covers the month: its sources draw the whole need and every other source,
+ * the bank included, draws 0 (DEV-1377).
+ */
 function coveredIn(funding: Funding, partnerId: string, month: string): boolean {
   const need = BigInt(funding.walk.cashNeedMinor[month] ?? '0');
-  const totals = partnerDraws(funding, month);
-  const others = [...totals].filter(([id]) => id !== partnerId).every(([, v]) => v === 0n);
-  return (totals.get(partnerId) ?? 0n) === need && others;
+  const own = new Set(funding.sourceGroups.filter((g) => g.partnerId === partnerId).map((g) => g.sourceId));
+  let named = 0n;
+  let othersDraw = false;
+  for (const [sourceId, total] of sourceDraws(funding, month)) {
+    if (own.has(sourceId)) named += total;
+    else if (total !== 0n) othersDraw = true;
+  }
+  return named === need && !othersDraw;
 }
 
 const mark = (ok: boolean): Mark => (ok ? 'ok' : 'breach');
