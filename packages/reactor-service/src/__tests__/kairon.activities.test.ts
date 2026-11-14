@@ -266,6 +266,25 @@ describe('kairon.buildGoalDrafts', () => {
     expect(out.variants[0]?.lineage.steps).toEqual([{ type: 'levers', goal, patch: { name: 'v1.1', scale: [r1(1_030_000)] } }]);
     expect(llm.complete.mock.calls[0]?.[0].messages[0]?.content).toContain('Return exactly 1 variants with ids v1.1.');
   });
+
+  it('answers that no draft was built when every lever for the goal is refused', async () => {
+    // SCENARIO: DEV-1377, «+100 млн чистой прибыли» on S2 v1; the LLM answers R1 × 1.05 three times, outside the ±3 % bound
+    // INPUT: net_profit_target delta 10 000 000 000 minor; 3 replies with scale R1 × 1 050 000 as v1.1
+    // EXPECTED: 3 LLM calls; no variant; v1.1 rejected; one answer saying no draft was built for v1
+    const b = await loadBaseline();
+    const empty = { stretch: [], shift: [], extend: [], scale: [], set: [], monthRangeTo: null, shareTarget: null };
+    const reply = JSON.stringify({ variants: [{ id: 'v1.1', title: 'Цены +5 %', rationale: 'r', levers: ['цены'], patch: { ...empty, scale: [r1(1_050_000)] } }], openQuestions: [] });
+    const llm = scriptedLlm([reply, reply, reply]);
+    const goal = { type: 'net_profit_target' as const, amountMinor: '10000000000', basis: 'delta' as const };
+    const out = (await createKaironActivities(fakeApi(stage5Evaluate))['kairon.buildGoalDrafts'](
+      { baseline: b, goal, parents: [S2_PARENTS[0]], existingIds: ['v1', 'v2', 'v3', 'v4'] },
+      ctxWith(llm),
+    )) as { variants: unknown[]; answers: Array<{ parentId: string; text: string }>; rejected: Array<{ id: string }> };
+    expect(llm.complete).toHaveBeenCalledTimes(3);
+    expect(out.variants).toEqual([]);
+    expect(out.rejected.map((r) => r.id)).toEqual(['v1.1']);
+    expect(out.answers).toEqual([{ parentId: 'v1', text: 'Цель недостижима рычагами в пределах ±3 %: черновик для v1 не построен' }]);
+  });
 });
 
 describe('kairon.scoreVariants against parents (stage 5)', () => {
@@ -407,6 +426,23 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
     );
     const out = await score({ proposals: { variants: [child], answers: [] }, parents: [{ id: 'v1', lineage: S2[0]?.lineage }], goals: [goal] });
     expect(out.variants[0]?.goalChecks[0]?.draft).toBe('breach');
+    expect(out.answers).toEqual([{ parentId: 'v1', text: 'Цель недостижима рычагами в пределах ±3 %: ближе всего v1.1' }]);
+  });
+
+  it('names only a ranked draft as the closest one', async () => {
+    // SCENARIO: DEV-1377, two children of S2 v1 with the same lever miss «+100 млн»; v1.2 equals v1.1 and is dropped before ranking
+    // INPUT: v1.1 and v1.2 = v1 + R1 × 1 030 000, both with the net_profit_target step
+    // EXPECTED: v1.2 dropped as the same as v1.1; ranking [v1.1]; one answer, naming v1.1 only
+    const goal = { type: 'net_profit_target' as const, amountMinor: '10000000000', basis: 'delta' as const };
+    const child = (id: string) =>
+      draft(id, ['цены'], lineage({ scenario: CONSTRUCTION, steps: [{ type: 'levers', goal, patch: { name: id, scale: [r1(1_030_000)] } }] }), 'v1');
+    const out = await score({
+      proposals: { variants: [child('v1.1'), child('v1.2')], answers: [] },
+      parents: [{ id: 'v1', lineage: S2[0]?.lineage }],
+      goals: [goal],
+    });
+    expect(out.dropped).toEqual([{ id: 'v1.2', sameAs: 'v1.1' }]);
+    expect(out.ranking).toEqual(['v1.1']);
     expect(out.answers).toEqual([{ parentId: 'v1', text: 'Цель недостижима рычагами в пределах ±3 %: ближе всего v1.1' }]);
   });
 });

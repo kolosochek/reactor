@@ -388,6 +388,7 @@ async function buildGoalDrafts(api: KaironApi, raw: unknown, ctx: ActivityContex
     model = out.model;
     attempts.push(...out.attempts);
     rejected.push(...out.rejected);
+    if (out.accepted.length === 0) answers.push({ parentId: parent.id, text: noDraftText(parent.id) });
     for (const v of out.accepted) {
       taken.push(v.id);
       variants.push({
@@ -512,7 +513,11 @@ function askedOf(lineage: DraftLineage, isChild: boolean): { lines: string[]; so
 
 const RULE_RED_LINES = 'Красные линии отсекают варианты: отсекает только нарушение, которое добавил сам вариант.';
 const RULE_LEVERS = 'При равенстве выигрывает вариант с меньшим числом рычагов.';
-const UNREACHABLE = 'Цель недостижима рычагами в пределах ±3 %: ближе всего';
+const UNREACHABLE = 'Цель недостижима рычагами в пределах ±3 %:';
+/** The answer for a draft that misses the goal it was built for; `id` is ranked, so the page shows it. */
+const closestText = (id: string) => `${UNREACHABLE} ближе всего ${id}`;
+/** The answer for a parent whose every lever the server refused: there is no draft to show. */
+const noDraftText = (parentId: string) => `${UNREACHABLE} черновик для ${parentId} не построен`;
 
 function goalRule(goal: RankGoal, b: Baseline): string {
   if (goal.type === 'net_profit_target') {
@@ -672,11 +677,12 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
   const redLinesById = Object.fromEntries(okVariants.map((v) => [v.id, v.redLines]));
 
   const answers = [...input.proposals.answers];
-  for (const v of okVariants) {
+  // A draft dropped as a twin of its parent or of an earlier draft is not ranked, so it is never named as the closest.
+  for (const v of okVariants.filter((x) => !droppedIds.has(x.id))) {
     const last = v.lineage.steps.at(-1);
     if (v.parentId === null || last === undefined || last.type !== 'levers') continue;
     const check = v.goalChecks.find((c) => c.goal === last.goal || JSON.stringify(c.goal) === JSON.stringify(last.goal));
-    if (check !== undefined && check.draft !== 'ok') answers.push({ parentId: v.parentId, text: `${UNREACHABLE} ${v.id}` });
+    if (check !== undefined && check.draft !== 'ok') answers.push({ parentId: v.parentId, text: closestText(v.id) });
   }
 
   const rows = [
