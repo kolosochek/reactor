@@ -83,13 +83,14 @@ describe('kairon diffVariant, delay-3 against Forecast v3', () => {
     expect(diff.interest).toEqual({ activeMinor: '11789401998', variantMinor: '12956739085' });
   });
 
-  it('notes typed interest and rule-proposed draws', () => {
-    // SCENARIO: Rivergate types F2/F3 by hand and Kairon proposes every draw
-    // INPUT: no derived lines; eval-delay-3 reconciliation interest_basis -12 956 739 085
-    // EXPECTED: the interest note with 154,3 and 129,6 млн CZK, the draws note; no tax note (revenue unchanged)
+  it('notes typed interest, rule-proposed draws and a bank that never starts', () => {
+    // SCENARIO: Rivergate types F2/F3 by hand, Kairon proposes every draw, and the bank has no start (DEV-1377)
+    // INPUT: no derived lines; eval-delay-3 reconciliation interest_basis -12 956 739 085; its bank draws 0 after 2026-08
+    // EXPECTED: the interest note with 154,3 and 129,6 млн CZK, the draws note, the bank note; no tax note (revenue unchanged)
     expect(diff.notes).toEqual([
       'Проценты F2, F3 вписаны в план: 154,3 млн CZK; чистая прибыль вычитает их. Прибыль на выходе для партнёров вычитает ещё проценты модели источников: 129,6 млн CZK.',
       'Транши партнёров предлагает правило финансирования Kairon; вариант их не задаёт.',
+      'Банк «Bank Financing» в открытых месяцах не выбирается: в Kairon у него нет даты «Доступен с» и нет закреплённого транша, а без старта правило финансирования отдаёт всю потребность партнёрам. Лимит 1\u00a0003,0 млн CZK, выбрано 97,4 млн CZK, свободно 905,6 млн CZK.',
     ]);
   });
 });

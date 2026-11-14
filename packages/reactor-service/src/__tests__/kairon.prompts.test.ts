@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { readBaseline } from '../kairon/baseline.js';
-import { explainSystemPrompt, explainUserPrompt, proposeSystemPrompt } from '../kairon/prompts.js';
+import { answerSystemPrompt, explainSystemPrompt, explainUserPrompt, proposeSystemPrompt } from '../kairon/prompts.js';
 import { baselineEvaluate, fakeKaironApi } from './_helpers/kaironFake.js';
 
 describe('kairon proposeSystemPrompt', () => {
@@ -64,5 +64,18 @@ describe('kairon explain prompts', () => {
     });
     expect(user).toContain('RANKING RULES:\n- При равенстве выигрывает вариант с меньшим числом рычагов.');
     expect(user).toContain('IF THE CLIENT VALUES ANOTHER GOAL:\n- Важна прибыль как в плане: v2.1');
+  });
+});
+
+describe('kairon answer prompt', () => {
+  it('tells the model how to read the bank facts', () => {
+    // SCENARIO: DEV-1377, «А где банк?» got an answer about LTV; the bank facts now exist and the model must know what they mean
+    // INPUT: the system prompt of the answer step
+    // EXPECTED: it names the bank fact keys and says what a start of «не задан» means for the funding rule
+    const system = answerSystemPrompt();
+    expect(system).toContain('{{<id>.bank.limit}}, {{<id>.bank.drawn}}, {{<id>.bank.free}}, {{<id>.bank.openDraws}}, {{<id>.bank.start}}');
+    expect(system).toContain(
+      'A start of «не задан» means the bank states no «Доступен с» date and no pinned tranche in Kairon, so the funding rule gives the whole need to the partners and the bank draws nothing',
+    );
   });
 });

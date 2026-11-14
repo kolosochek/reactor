@@ -540,6 +540,19 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
     expect(leversRow(await score({ proposals: { variants: [cover] }, parents: [{ id: 'v2', lineage: lineage({}) }], goals: [COVER_GOAL] }))).toEqual({ 'v2.1': 'нет' });
   });
 
+  it('states the bank of the active forecast and of each draft as facts', async () => {
+    // SCENARIO: DEV-1377, «А где банк?» must be answerable from facts; Rivergate's bank has no start, so no draft draws from it
+    // INPUT: the four S2 drafts against the active forecast
+    // EXPECTED: active and v3 carry limit 1 003,0, drawn 97,4, free 905,6, 0,0 in the open months, start «не задан»,
+    //           the target bank share 70,00 %
+    const out = await score({ proposals: { variants: S2 }, parents: [], goals: [] });
+    const bankFactsOf = (key: string) =>
+      ['limit', 'drawn', 'free', 'openDraws', 'start', 'targetShare'].map((name) => out.facts[`${key}.bank.${name}`]);
+    const expected = ['1\u00a0003,0 млн CZK', '97,4 млн CZK', '905,6 млн CZK', '0,0 млн CZK', 'не задан', '70,00 %'];
+    expect(bankFactsOf('active')).toEqual(expected);
+    expect(bankFactsOf('v3')).toEqual(expected);
+  });
+
   it('ranks the children of two parents each against its own delta target', async () => {
     // SCENARIO: DEV-1377, «+35 млн к прибыли» on S2 v1 (333,4 млн) and S2 v2 (347,9 млн)
     // INPUT: v1.1 = v1 + R1 × 1.03 (384,5 млн, target 368,4); v2.1 = v2 + R1 × 1.023 (387,0 млн, target 382,9)

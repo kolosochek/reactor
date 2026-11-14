@@ -272,7 +272,7 @@ export function widgetsUserPrompt(variants: Array<{ id: string; changed: Array<{
 }
 
 export function answerSystemPrompt(): string {
-  return `You answer a CFO's question about forecast drafts, in Russian, in 1-4 sentences. A server computed every figure. You cite figures ONLY as placeholders {{key}} taken from the FACTS list; you never type a figure, percentage or amount yourself. When the facts do not answer the question, say which figure is missing. Return only one JSON object {"answer": "..."}.`;
+  return `You answer a CFO's question about forecast drafts, in Russian, in 1-4 sentences. A server computed every figure. You cite figures ONLY as placeholders {{key}} taken from the FACTS list; you never type a figure, percentage or amount yourself. When the facts do not answer the question, say which figure is missing. The senior bank is in the facts of the active forecast and of every draft: {{<id>.bank.limit}}, {{<id>.bank.drawn}}, {{<id>.bank.free}}, {{<id>.bank.openDraws}}, {{<id>.bank.start}}, {{<id>.bank.share}}, {{<id>.bank.targetShare}}; drawn is what the bank has lent by the closed month, openDraws its tranches after it, share its part of the financing at the end, targetShare the part Kairon aims at. A start of «не задан» means the bank states no «Доступен с» date and no pinned tranche in Kairon, so the funding rule gives the whole need to the partners and the bank draws nothing; say so when asked where the bank is. Return only one JSON object {"answer": "..."}.`;
 }
 
 export function answerUserPrompt(question: string, drafts: Array<{ id: string; title: string }>, facts: Record<string, string>): string {

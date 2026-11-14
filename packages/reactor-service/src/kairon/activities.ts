@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { Activity, ActivityContext, LLMCompletionRequest } from '@kolosochek/reactor-core';
 import { digestLines, loadDocument, readBaseline, type Baseline } from './baseline.js';
+import { bankFacts, bankOf, type BankState } from './bank.js';
 import { checkPatch, leverBoundErrors, patchLineCodes, patchOpCount, type PatchRules } from './checks.js';
 import type { KaironApi } from './client.js';
 import { route, RouteInput, StructureGoalInput, structureGoal, StructureScenarioInput, structureScenario } from './conversation.js';
@@ -477,6 +478,8 @@ export interface ScoredVariant {
   diffView: DiffView | null;
   /** What w1 and w2 read from the parent's and the draft's evaluation; null unless Kairon scored it. */
   widgetInputs: { parent: WidgetInputs; draft: WidgetInputs } | null;
+  /** The senior bank as the draft's evaluate states it; null unless Kairon scored it or the project has no bank. */
+  bank: BankState | null;
   /** Server-side scoring inputs the ranking reads. */
   touchesReserve: boolean;
   reserveLeftMinor: string;
@@ -605,6 +608,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
       changed: [],
       diffView: null,
       widgetInputs: null,
+      bank: null,
       touchesReserve: false,
       reserveLeftMinor: '0',
     };
@@ -669,6 +673,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
         revenueGroups: REVENUE_GROUP_CODES,
       }),
       widgetInputs: { parent: widgetInputs(parent.eval), draft: widgetInputs(res.json) },
+      bank: bankOf(res.json, b.closedThrough),
       touchesReserve: reserve.touches,
       reserveLeftMinor: reserve.leftMinor,
     };
@@ -727,6 +732,11 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
     ...okVariants.map((v) => ({ key: v.id, metrics: v.metrics })),
   ];
   const facts = buildFacts(currency, b.approved, rows);
+  // The bank of the active forecast and of each draft, so «где банк?» is answered from facts.
+  const bankSides: Array<[string, BankState | null]> = [['active', bankOf(activeSide.eval, b.closedThrough)], ...variants.map((v): [string, BankState | null] => [v.id, v.bank])];
+  for (const [key, bank] of bankSides) {
+    if (bank !== null) Object.assign(facts, bankFacts(currency, key, bank));
+  }
   for (const v of okVariants) {
     const parent = parentOf(v);
     if (v.diff !== null) Object.assign(facts, diffFacts(currency, v.id, parent.metrics, v.metrics, v.diff, parent.key));

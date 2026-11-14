@@ -17,6 +17,7 @@
 // - notes: what the evaluation cannot see (a typed tax line, typed interest).
 
 import { z } from 'zod';
+import { bankNote, bankOf } from './bank.js';
 import { INTEREST_LINE_CODES } from './checks.js';
 import type { ForecastPlan } from './patch.js';
 import { formatMillions, signedMillions, type CurrencyFormat } from './summary.js';
@@ -210,6 +211,10 @@ function notesOf(input: VariantDiffInput, variant: Evaluation, bridge: Map<Bridg
   if (variant.draws.length > 0 && variant.draws.every((d) => d.provenance === 'proposed')) {
     notes.push('Транши партнёров предлагает правило финансирования Kairon; вариант их не задаёт.');
   }
+  // Why the funding plan shows no bank: read off the variant's own evaluate, never planned here.
+  const bank = bankOf(input.variantEval, input.closedThrough);
+  const bankLine = bank === null ? null : bankNote(bank, currency);
+  if (bankLine !== null) notes.push(bankLine);
   return notes;
 }
 
