@@ -26,6 +26,7 @@ interface RenderModule {
   saveOutcome(status: number, json: unknown): { text: string; canRetry: boolean };
   renderRouteNote(route: unknown): string;
   answersOf(out: unknown): Array<{ parentId: string; text: string }>;
+  sessionExport(session: unknown, meta: unknown): unknown;
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -376,5 +377,114 @@ describe('kairon render: answers of a run', () => {
     // EXPECTED: [] for both
     expect(render.answersOf({ proposals: { variants: [] }, scored: { answers: [] } })).toEqual([]);
     expect(render.answersOf({ scored: {} })).toEqual([]);
+  });
+});
+
+describe('kairon render: session export', () => {
+  const ev = (t: number, type: string, payload: unknown) => ({ t, type, payload });
+
+  it('puts every run of every message into one JSON document with a step index', () => {
+    // SCENARIO: the owner exports a whole session for analysis: one generate message (route run + execute run) and one question
+    // INPUT: session.record with 3 runs, their events as /kairon/run streamed them; one section with a goal, a selected draft and 2 drafts
+    // EXPECTED: format and version, the meta, 2 messages (2 runs and 1 run), per run the tools, LLM calls and Kairon calls in order
+    //           with timings, tokens and cost, the events untouched, and the section state without page nodes
+    const routeEvents = [
+      ev(0, 'run.start', { request: { idea: {}, providerConfig: { provider: 'openrouter', model: 'm/x', apiKey: 'sk-or-…abcd' } } }),
+      ev(1, 'tool.start', { tool: 'kairon.route', kind: 'latent', inputSchema: {}, args: { message: 'Сдвиг на 6 месяцев' } }),
+      ev(2, 'llm.request', { callId: 'llm-1', label: 'route, attempt 1', url: 'u', body: {} }),
+      ev(900, 'llm.done', { callId: 'llm-1', ms: 898, model: 'm/x', finishReason: 'stop', content: '{}', usage: { prompt_tokens: 1057, completion_tokens: 242, cost: 0.00168 } }),
+      ev(901, 'tool.end', { tool: 'kairon.route', ms: 900, output: { kind: 'generate', scope: [], error: null } }),
+      ev(902, 'run.done', { ms: 902, solution: { output: { route: { kind: 'generate' } } } }),
+    ];
+    const executeEvents = [
+      ev(0, 'run.start', { request: { idea: {}, providerConfig: { provider: 'openrouter', model: 'm/x', apiKey: 'sk-or-…abcd' } } }),
+      ev(1, 'tool.start', { tool: 'kairon.baseline', kind: 'deterministic', inputSchema: {}, args: {} }),
+      ev(330, 'kairon.call', { op: 'listVersions', method: 'GET', path: '/p', status: 200, ms: 328, response: [] }),
+      ev(886, 'tool.end', { tool: 'kairon.baseline', ms: 886, output: {} }),
+      ev(887, 'tool.start', { tool: 'kairon.scoreVariants', kind: 'deterministic', inputSchema: {}, args: {} }),
+      ev(900, 'run.error', { class: 'ZodError', message: 'bad input' }),
+    ];
+    const questionEvents = [ev(0, 'run.start', { request: { idea: {}, providerConfig: {} } }), ev(5, 'run.done', { ms: 5, solution: { output: {} } })];
+    const run = (events: unknown[], failure: string | null) => ({ events, runRequest: null, solution: null, failure });
+    const session = {
+      record: [
+        { message: 'Сдвиг на 6 месяцев', step: 'route', run: run(routeEvents, null) },
+        { message: 'Сдвиг на 6 месяцев', step: 'execute', run: run(executeEvents, 'ZodError: bad input') },
+        { message: 'А где банк?', step: 'route', run: run(questionEvents, null) },
+      ],
+      selected: { section: 'S1', id: 'v2' },
+      sections: [
+        {
+          id: 'S1',
+          scenario: 'Сдвиг на 6 месяцев',
+          spec: { type: 'free' },
+          goals: [{ type: 'irr_floor', partnerIds: ['cedar'] }],
+          facts: { 'v1.irr.cedar': '21,28 %' },
+          chips: { nodeType: 1 },
+          drafts: new Map([
+            ['v1', { id: 'v1', parentId: null, title: 'База', status: 'ok', levers: [], lineage: { steps: [] }, diff: { big: true } }],
+            ['v2', { id: 'v2', parentId: null, title: 'Цены', status: 'ok', levers: ['цены'], lineage: { steps: [] }, diff: { big: true } }],
+          ]),
+        },
+      ],
+    };
+
+    const out = render.sessionExport(session, { exportedAt: '2026-11-14T10:00:00.000Z', model: 'm/x', variantCount: 3 });
+
+    expect(out).toEqual({
+      format: 'kairon-reactor-session',
+      version: 1,
+      exportedAt: '2026-11-14T10:00:00.000Z',
+      model: 'm/x',
+      variantCount: 3,
+      messages: [
+        {
+          index: 1,
+          text: 'Сдвиг на 6 месяцев',
+          runs: [
+            {
+              step: 'route',
+              failure: null,
+              ms: 902,
+              tools: [{ tool: 'kairon.route', ms: 900, ended: true }],
+              llm: [{ callId: 'llm-1', label: 'route, attempt 1', model: 'm/x', ms: 898, finishReason: 'stop', tokensIn: 1057, tokensOut: 242, costUsd: 0.00168 }],
+              kairon: [],
+              events: routeEvents,
+            },
+            {
+              step: 'execute',
+              failure: 'ZodError: bad input',
+              ms: null,
+              tools: [
+                { tool: 'kairon.baseline', ms: 886, ended: true },
+                { tool: 'kairon.scoreVariants', ms: null, ended: false },
+              ],
+              llm: [],
+              kairon: [{ op: 'listVersions', method: 'GET', status: 200, ms: 328 }],
+              events: executeEvents,
+            },
+          ],
+        },
+        {
+          index: 2,
+          text: 'А где банк?',
+          runs: [{ step: 'route', failure: null, ms: 5, tools: [], llm: [], kairon: [], events: questionEvents }],
+        },
+      ],
+      sections: [
+        {
+          id: 'S1',
+          scenario: 'Сдвиг на 6 месяцев',
+          spec: { type: 'free' },
+          goals: [{ type: 'irr_floor', partnerIds: ['cedar'] }],
+          selected: 'v2',
+          drafts: [
+            { id: 'v1', parentId: null, title: 'База', status: 'ok', levers: [], lineage: { steps: [] } },
+            { id: 'v2', parentId: null, title: 'Цены', status: 'ok', levers: ['цены'], lineage: { steps: [] } },
+          ],
+        },
+      ],
+    });
+    expect(() => JSON.stringify(out)).not.toThrow();
   });
 });

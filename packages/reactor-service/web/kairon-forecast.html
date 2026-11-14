@@ -192,6 +192,7 @@ svg text { font-size: 11px; }
     <div class="modelinfo" id="modelInfo"></div>
     <label>Сохранённый прогон<input id="replay" type="file" accept=".ndjson,application/x-ndjson"></label>
     <button id="saveSession" type="button">Сохранить сессию</button>
+    <button id="exportSession" type="button" title="Все прогоны reactor этой страницы одним JSON-файлом: шаги, вызовы LLM и Kairon, входы и выходы, разделы и черновики">Выгрузить прогоны (.json)</button>
   </div>
 </header>
 <main id="chat">
@@ -1577,6 +1578,16 @@ svg text { font-size: 11px; }
   $('saveSession').addEventListener('click', () => {
     const lines = session.record.flatMap((r) => [JSON.stringify({ t: 0, type: 'session.run', payload: { message: r.message, step: r.step } })].concat(r.run.events.map((e) => JSON.stringify(e))));
     const a = el('a', { href: URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'application/x-ndjson' })), download: 'kairon-session-' + new Date().toISOString().slice(0, 19).split(':').join('-') + '.ndjson' });
+    a.click();
+  });
+
+  /** Every reactor run of the page as one JSON file, for analysis outside the page (R.sessionExport). */
+  $('exportSession').addEventListener('click', async () => {
+    if (session.record.length === 0) return;
+    await renderReady;
+    const exportedAt = new Date().toISOString();
+    const doc = R.sessionExport(session, { exportedAt, model: modelEl.value, variantCount: Number(countEl.value) });
+    const a = el('a', { href: URL.createObjectURL(new Blob([JSON.stringify(doc)], { type: 'application/json' })), download: 'kairon-session-' + exportedAt.slice(0, 19).split(':').join('-') + '.json' });
     a.click();
   });
 

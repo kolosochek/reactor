@@ -291,6 +291,71 @@ export function answersOf(out) {
   return out?.scored?.answers ?? [];
 }
 
+/** One run as the export indexes it: its tools, LLM calls and Kairon calls in order, with the events untouched. */
+function runExport(step, run) {
+  const events = run.events;
+  const labels = new Map(events.filter((e) => e.type === 'llm.request').map((e) => [e.payload.callId, e.payload.label ?? null]));
+  const ended = events.filter((e) => e.type === 'tool.end');
+  const tools = events
+    .filter((e) => e.type === 'tool.start')
+    .map((e, i) => ({ tool: e.payload.tool, ms: ended[i]?.payload.ms ?? null, ended: ended[i] !== undefined }));
+  const llm = events
+    .filter((e) => e.type === 'llm.done')
+    .map(({ payload: p }) => ({
+      callId: p.callId,
+      label: labels.get(p.callId) ?? null,
+      model: p.model ?? null,
+      ms: p.ms ?? null,
+      finishReason: p.finishReason ?? null,
+      tokensIn: p.usage?.prompt_tokens ?? null,
+      tokensOut: p.usage?.completion_tokens ?? null,
+      costUsd: p.usage?.cost ?? null,
+    }));
+  const kairon = events
+    .filter((e) => e.type === 'kairon.call')
+    .map(({ payload: p }) => ({ op: p.op, method: p.method, status: p.status, ms: p.ms }));
+  const done = events.find((e) => e.type === 'run.done');
+  return { step, failure: run.failure ?? null, ms: done?.payload.ms ?? null, tools, llm, kairon, events };
+}
+
+/**
+ * The whole session as one JSON document, for analysis outside the page: every run of every message
+ * (planning and execution) with a short index over its events, and the sections as the page holds them
+ * (goals, the selected draft, each draft's lineage). The steps of a plan run one after another, so the
+ * n-th tool.end closes the n-th tool.start. The API key is already redacted in run.start by the service.
+ */
+export function sessionExport(session, meta) {
+  const messages = [];
+  for (const r of session.record) {
+    if (r.step === 'route' || messages.length === 0) messages.push({ index: messages.length + 1, text: r.message, runs: [] });
+    messages[messages.length - 1].runs.push(runExport(r.step, r.run));
+  }
+  const sections = session.sections.map((s) => ({
+    id: s.id,
+    scenario: s.scenario,
+    spec: s.spec,
+    goals: s.goals,
+    selected: session.selected?.section === s.id ? session.selected.id : null,
+    drafts: [...s.drafts.values()].map((v) => ({
+      id: v.id,
+      parentId: v.parentId ?? null,
+      title: v.title,
+      status: v.status,
+      levers: v.levers,
+      lineage: v.lineage,
+    })),
+  }));
+  return {
+    format: 'kairon-reactor-session',
+    version: 1,
+    exportedAt: meta.exportedAt,
+    model: meta.model,
+    variantCount: meta.variantCount,
+    messages,
+    sections,
+  };
+}
+
 export function renderOverview(explanation, scored) {
   const titleOf = (id) => scored.variants.find((v) => v.id === id)?.title ?? '';
   const rec = explanation.recommendation ?? '';
