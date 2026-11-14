@@ -619,6 +619,47 @@ describe('kairon.scoreVariants', () => {
     ]);
     expect(out.facts['v1.bridge.revenue']).toBeUndefined();
   });
+
+  it('counts the levers a free proposal names, since its patch carries the scenario too', async () => {
+    // SCENARIO: DEV-1377, a free draft's patch mixes the scenario's ops with the levers', so its op count is not a lever count
+    // INPUT: v1 = delay-3 patch (4 ops), levers []; v2 = delay-3 patch + R1 × 1.01 (5 ops), levers ['Цены квартир']
+    //        (the fake answers v2 with the delay-3 evaluate and a net profit 1 000 000 minor higher, so it is no twin of v1)
+    // EXPECTED: «Рычаги» reads нет for v1 and 1 for v2
+    const b = await loadBaseline();
+    const { name: _name, ...p1 } = delay3Patch;
+    const p2 = { ...p1, scale: [{ lineCodes: ['R1'], fromMonth: '2028-03', factorPpm: 1_010_000 }] };
+    const r1Total = (plan: { lines: Array<{ code: string; monthlyForecast: Record<string, string> }> }) =>
+      Object.values(plan.lines.find((l) => l.code === 'R1')?.monthlyForecast ?? {}).reduce((sum, v) => sum + BigInt(v), 0n);
+    const delay3Eval = readJson('responses/eval-delay-3.json') as { netProfit: string };
+    const activities = createKaironActivities(
+      fakeApi((_v, body) => {
+        if (JSON.stringify(body) === '{}') return { status: 200, json: readJson('responses/eval-active.json') };
+        const plan = (body as { plan: Parameters<typeof r1Total>[0] }).plan;
+        return r1Total(plan) === r1Total(fixtureDoc.plan)
+          ? { status: 200, json: delay3Eval }
+          : { status: 200, json: { ...delay3Eval, netProfit: String(BigInt(delay3Eval.netProfit) + 1_000_000n) } };
+      }),
+    );
+
+    const out = (await activities['kairon.scoreVariants'](
+      {
+        baseline: b,
+        proposals: {
+          variants: [
+            { id: 'v1', title: 'a', rationale: 'r', levers: [], patch: p1 },
+            { id: 'v2', title: 'b', rationale: 'r', levers: ['Цены квартир'], patch: p2 },
+          ],
+        },
+      },
+      ctxWith(scriptedLlm([])),
+    )) as { variants: Array<{ id: string; status: string }>; matrix: Array<{ label: string; values: Record<string, string> }> };
+
+    expect(out.variants.map((v) => [v.id, v.status])).toEqual([
+      ['v1', 'ok'],
+      ['v2', 'ok'],
+    ]);
+    expect(out.matrix.find((r) => r.label === 'Рычаги')?.values).toEqual({ v1: 'нет', v2: '1' });
+  });
 });
 
 describe('kairon structured output (stage 3)', () => {

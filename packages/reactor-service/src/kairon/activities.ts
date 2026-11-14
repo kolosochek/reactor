@@ -513,10 +513,13 @@ function askedOf(lineage: DraftLineage, isChild: boolean): { lines: string[]; so
 
 /**
  * The levers of the draft's own step, counted by the server: the ops of its last lever patch. A draft the
- * server built from the scenario alone and a cover draft have none. The LLM's `levers` list is display text.
+ * server built from the scenario alone and a cover draft have none. A free draft's patch carries the
+ * scenario's ops next to the levers', and the server cannot tell them apart, so a free draft with no step
+ * keeps the count of the levers its proposal names (its v1 is refused when it names any).
  */
-function ownLeverCount(lineage: DraftLineage): number {
+function ownLeverCount(lineage: DraftLineage, namedLevers: string[]): number {
   const last = lineage.steps.at(-1);
+  if (last === undefined && lineage.scenario.type === 'free') return namedLevers.length;
   const patch = last === undefined ? lineage.leverPatch : last.type === 'levers' ? last.patch : null;
   return patch === null ? 0 : patchOpCount(patch);
 }
@@ -678,7 +681,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
       id: v.id,
       metrics: v.metrics,
       parentMetrics: parentOf(v).metrics,
-      leverCount: ownLeverCount(v.lineage),
+      leverCount: ownLeverCount(v.lineage, v.levers),
       touchesReserve: v.touchesReserve,
       reserveLeftMinor: v.reserveLeftMinor,
       addedBreaches: v.redLines.filter((l) => l.status === 'breach' && l.baseStatus !== 'breach').length,
