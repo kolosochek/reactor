@@ -7,7 +7,6 @@ import { createKaironActivities } from '../kairon/activities.js';
 import type { Baseline } from '../kairon/baseline.js';
 import type { KaironLLMRequest } from '../kairon/openrouter.js';
 import { canonicalJson, planHash, type DraftLineage } from '../kairon/lineage.js';
-import { widgetInputs } from '../kairon/widgets.js';
 import {
   baselineEvaluate,
   fakeKaironApi as fakeApi,
@@ -480,17 +479,14 @@ describe('kairon.scoreVariants against parents (stage 5)', () => {
     expect(checks[0]?.months.filter((m) => m.draft)).toHaveLength(6);
   });
 
-  it('carries the widget inputs of the parent and the draft', async () => {
-    // SCENARIO: the page draws w1 and w2 for v2.1 from the scored output (DEV-1376)
+  it('carries no trimmed evaluations for the page (DEV-1381)', async () => {
+    // SCENARIO: the page drew its own draws widgets from widgetInputs; the catalog draws them from widget data now
     // INPUT: the cover child v2.1 of v2 (the active forecast)
-    // EXPECTED: widgetInputs.parent = widgetInputs(eval-active), widgetInputs.draft = widgetInputs(cover-cedar.eval)
+    // EXPECTED: the scored draft has no widgetInputs key
     const draws = (readJson('stage5/cover-cedar.body.json') as { draws: unknown[] }).draws;
     const child = draft('v2.1', [], lineage({ steps: [{ type: 'cover', goal: COVER_GOAL, draws } as DraftLineage['steps'][number]] }), 'v2');
     const out = await score({ proposals: { variants: [child] }, parents: [{ id: 'v2', lineage: lineage({}) }], goals: [COVER_GOAL] });
-    expect(out.variants[0]?.widgetInputs).toEqual({
-      parent: widgetInputs(readJson('stage5/eval-active.json')),
-      draft: widgetInputs(readJson('stage5/cover-cedar.eval.json')),
-    });
+    expect([out.variants[0]?.status, 'widgetInputs' in (out.variants[0] ?? {})]).toEqual(['ok', false]);
   });
 
   it('scores an empty proposal without an error', async () => {

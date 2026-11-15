@@ -45,7 +45,7 @@ import { criteriaMatrix, rankDrafts, sameAsEarlier, switchesFor, type DraftScore
 import { reconcile, type Reconciliation } from './reconcile.js';
 import { redLines, type RedLine } from './redLines.js';
 import { cutWidgetData, WIDGETS_DIST_ENV, type SubjectInput, type WidgetCatalog } from './widgetCatalog.js';
-import { catalogPaths, changedPaths, widgetInputs, type PathChange, type WidgetInputs } from './widgets.js';
+import { catalogPaths, changedPaths, type PathChange } from './widgets.js';
 import { applyScenario, ScenarioSpecSchema, type ScenarioSpec } from './scenario.js';
 import {
   proposeSystemPrompt,
@@ -478,7 +478,6 @@ export interface ScoredVariant {
   changed: PathChange[];
   diffView: DiffView | null;
   /** What w1 and w2 read from the parent's and the draft's evaluation; null unless Kairon scored it. */
-  widgetInputs: { parent: WidgetInputs; draft: WidgetInputs } | null;
   /**
    * Catalog widget id to that widget's data, the parent as the baseline (DEV-1380); null unless Kairon scored
    * the draft. This field and widgetErrors exist only when a widgets catalog is loaded.
@@ -631,7 +630,6 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
       goalChecks: [],
       changed: [],
       diffView: null,
-      widgetInputs: null,
       ...(catalog === null ? {} : { widgetData: null, widgetErrors: [] }),
       bank: null,
       touchesReserve: false,
@@ -716,7 +714,6 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
         diff,
         revenueGroups: REVENUE_GROUP_CODES,
       }),
-      widgetInputs: { parent: widgetInputs(parent.eval), draft: widgetInputs(res.json) },
       ...(cut === null ? {} : { widgetData: cut.data, widgetErrors: cut.errors }),
       bank: bankOf(res.json, b.closedThrough),
       touchesReserve: reserve.touches,

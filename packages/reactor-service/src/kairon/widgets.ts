@@ -1,12 +1,11 @@
 // packages/reactor-service/src/kairon/widgets.ts
 //
-// Widgets chosen by changed paths (DEV-1375, spec 5.5). The server lists the
-// JSON paths a draft changes against its parent and how many cells each
-// changed. Stage 4 blocks are the existing widgets for plan lines, cumulative
-// cash, partner IRR and events; a changed path without one gets a declarative
-// spec from the LLM's widgets step (a tool name and the paths it reads, no
-// HTML, no numbers). funding.draws always gets the matrix-diff (w1): the
-// owner made it mandatory.
+// Widgets of a scored draft (DEV-1375 spec 5.5, DEV-1380, DEV-1381). The server lists the JSON
+// paths a draft changes against its parent and how many cells each changed. The figures are
+// catalog widgets (the forecast widgets package): the server gives a draft an instance of every
+// manifest widget whose data the scoring cut and one of whose read paths changed. The service
+// draws one widget itself, the goal check, which the LLM's widgets step may name (a tool name and
+// a title, no HTML, no numbers).
 
 import { z } from 'zod';
 import type { VariantDiff } from './diff.js';
@@ -37,67 +36,15 @@ export function catalogPaths(manifest: Array<{ reads: string[] }>): string[] {
   return [...new Set(manifest.flatMap((entry) => entry.reads))];
 }
 
-export const EXISTING_WIDGETS: Record<Exclude<ChangedPath, 'funding.draws'>, 'bridge' | 'cash' | 'irr' | 'timeline'> = {
-  'plan.lines': 'bridge',
-  'walk.cumulativeNetCashMinor': 'cash',
-  'exit.partners': 'irr',
-  events: 'timeline',
-};
-
 const Title = z.string().min(1);
 
-export const WidgetSpecSchema = z.discriminatedUnion('widget', [
-  z
-    .object({
-      widget: z.literal('matrix-diff'),
-      title: Title,
-      rows: z.literal('draws[].sourceId'),
-      cols: z.literal('draws[].period'),
-      value: z.literal('amountMinor'),
-      highlight: z.literal('changed'),
-      delta: z.literal('cell, row'),
-    })
-    .strict(),
-  z
-    .object({
-      widget: z.literal('bars-before-after'),
-      title: Title,
-      x: z.literal('period'),
-      stack: z.literal('sourceId'),
-      y: z.literal('amountMinor'),
-      compare: z.tuple([z.string().min(1), z.string().min(1)]),
-      label: z.string().min(1),
-    })
-    .strict(),
-  z.object({ widget: z.literal('condition-check'), title: Title, goals: z.literal('active') }).strict(),
-  z.object({ widget: z.literal('stakeholder-table'), title: Title, rows: z.array(z.string().min(1)) }).strict(),
-]);
+/** The one declarative widget the service draws itself: the draft's goal checks. */
+export const WidgetSpecSchema = z.object({ widget: z.literal('condition-check'), title: Title, goals: z.literal('active') }).strict();
 
 export type WidgetSpec = z.infer<typeof WidgetSpecSchema>;
 
-/** The paths a widget reads; an empty list means it is always kept (the goal checks). */
-const WIDGET_PATHS: Record<WidgetSpec['widget'], ChangedPath[]> = {
-  'matrix-diff': ['funding.draws'],
-  'bars-before-after': ['funding.draws'],
-  'condition-check': [],
-  'stakeholder-table': ['funding.draws', 'exit.partners'],
-};
-
 /** The declarative widgets this service draws itself; any other name in an LLM reply is a catalog widget or unknown. */
-export const OWN_WIDGETS: readonly string[] = Object.keys(WIDGET_PATHS);
-
-const WidgetInputsShape = z.object({
-  draws: z.array(z.object({ sourceId: z.string(), period: z.string(), amountMinor: z.string() })),
-  walk: z.object({ sources: z.array(z.object({ id: z.string(), name: z.string() })), cashNeedMinor: z.record(z.string()) }),
-  sourceGroups: z.array(z.object({ sourceId: z.string(), partnerId: z.string().optional() })),
-});
-
-/** The slice of an evaluation the draws widgets (w1, w2) read; it rides on each scored variant. */
-export type WidgetInputs = z.infer<typeof WidgetInputsShape>;
-
-export function widgetInputs(evaluation: unknown): WidgetInputs {
-  return WidgetInputsShape.parse(evaluation);
-}
+export const OWN_WIDGETS: readonly string[] = ['condition-check'];
 
 const PathShape = z.object({
   draws: z.array(z.object({ sourceId: z.string(), period: z.string(), amountMinor: z.string() })),
@@ -209,39 +156,6 @@ export function changedPaths(
     counts.push({ path, cells: cellsBetween(readAt(parentSide, path), readAt(draftSide, path)) });
   }
   return counts.filter((c) => c.cells > 0);
-}
-
-const MATRIX: WidgetSpec = {
-  widget: 'matrix-diff',
-  title: 'Транши по инвесторам',
-  rows: 'draws[].sourceId',
-  cols: 'draws[].period',
-  value: 'amountMinor',
-  highlight: 'changed',
-  delta: 'cell, row',
-};
-
-const BARS: WidgetSpec = {
-  widget: 'bars-before-after',
-  title: 'Транши по инвесторам: было и стало',
-  x: 'period',
-  stack: 'sourceId',
-  y: 'amountMinor',
-  compare: ['parent', 'draft'],
-  label: 'Δ за месяц',
-};
-
-export function defaultWidgets(changed: PathChange[]): WidgetSpec[] {
-  return changed.some((c) => c.path === 'funding.draws') ? [MATRIX, BARS] : [];
-}
-
-export function withMandatory(specs: WidgetSpec[], changed: PathChange[]): WidgetSpec[] {
-  const paths = new Set(changed.map((c) => c.path));
-  const kept = specs.filter((s) => {
-    const reads = WIDGET_PATHS[s.widget];
-    return reads.length === 0 || reads.some((p) => paths.has(p));
-  });
-  return paths.has('funding.draws') && !kept.some((s) => s.widget === 'matrix-diff') ? [MATRIX, ...kept] : kept;
 }
 
 // ---------- catalog widgets (DEV-1380) ----------

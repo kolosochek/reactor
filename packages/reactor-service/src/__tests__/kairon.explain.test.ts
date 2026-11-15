@@ -34,37 +34,25 @@ describe('kairon.planWidgets', () => {
     ],
   };
 
-  it('puts the mandatory matrix-diff before the bars the LLM chose', async () => {
-    // SCENARIO: the cover draft changed the draws; the LLM proposed only bars
-    // INPUT: one reply with bars-before-after for v2.1
-    // EXPECTED: v2.1 gets matrix-diff then bars; the refused v3 gets nothing; one LLM call
-    const reply = {
-      widgets: [
-        {
-          id: 'v2.1',
-          specs: [
-            { widget: 'bars-before-after', title: 'Было и стало', x: 'period', stack: 'sourceId', y: 'amountMinor', compare: ['parent', 'draft'], label: 'Δ' },
-          ],
-        },
-      ],
-    };
-    const llm = scriptedLlm([JSON.stringify(reply)]);
-    const out = (await activities['kairon.planWidgets']({ scored: coverScored }, ctxWith(llm))) as {
-      widgets: Record<string, Array<{ widget: string }>>;
-    };
-    expect(Object.keys(out.widgets)).toEqual(['v2.1']);
-    expect(out.widgets['v2.1']?.map((s) => s.widget)).toEqual(['matrix-diff', 'bars-before-after']);
-    expect(llm.complete).toHaveBeenCalledTimes(1);
+  it('keeps the goal check the LLM chose and gives a refused draft nothing', async () => {
+    // SCENARIO: the cover draft has a goal; the LLM names the goal check for it (DEV-1381: the one own widget)
+    // INPUT: one reply with condition-check for v2.1
+    // EXPECTED: v2.1 gets the goal check; the refused v3 gets nothing; one LLM call
+    const check = { widget: 'condition-check', title: 'Цель', goals: 'active' };
+    const llm = scriptedLlm([JSON.stringify({ widgets: [{ id: 'v2.1', specs: [check] }] })]);
+    const out = (await activities['kairon.planWidgets']({ scored: coverScored }, ctxWith(llm))) as { widgets: Record<string, unknown[]> };
+    expect([out.widgets, llm.complete.mock.calls.length]).toEqual([{ 'v2.1': [check] }, 1]);
   });
 
-  it('falls back to the default widgets on a broken reply', async () => {
-    // SCENARIO: the LLM returns prose
-    // INPUT: reply 'no json'
-    // EXPECTED: v2.1 gets the defaults: matrix-diff then bars-before-after
-    const out = (await activities['kairon.planWidgets']({ scored: coverScored }, ctxWith(scriptedLlm(['no json'])))) as {
-      widgets: Record<string, Array<{ widget: string }>>;
-    };
-    expect(out.widgets['v2.1']?.map((s) => s.widget)).toEqual(['matrix-diff', 'bars-before-after']);
+  it('gives no own widget on a broken reply or on a widget the catalog replaced', async () => {
+    // SCENARIO: the draws figures are catalog widgets now, so the service has no default own widget
+    // INPUT: (a) the reply 'no json'; (b) replies naming bars-before-after for v2.1
+    // EXPECTED: v2.1 gets an empty list both times
+    const bars = { widget: 'bars-before-after', title: 'Было и стало', x: 'period', stack: 'sourceId', y: 'amountMinor', compare: ['parent', 'draft'], label: 'Δ' };
+    const barsReply = JSON.stringify({ widgets: [{ id: 'v2.1', specs: [bars] }] });
+    const run = async (replies: string[]) =>
+      ((await activities['kairon.planWidgets']({ scored: coverScored }, ctxWith(scriptedLlm(replies)))) as { widgets: Record<string, unknown[]> }).widgets;
+    expect([await run(['no json', 'no json']), await run([barsReply, barsReply])]).toEqual([{ 'v2.1': [] }, { 'v2.1': [] }]);
   });
 });
 
@@ -106,13 +94,13 @@ describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
     // INPUT: v1 changed the draws, the cash line and the net profit; data for stub-cash and stub-profit
     // EXPECTED: instances stub-cash (v2) and stub-profit (v1) in manifest order, titled by the manifest, empty focus,
     //           provenance kairon, each stamped with the build id of the catalog that cut its data (review I1);
-    //           the draws rule still gives matrix-diff and bars
+    //           no own widget (DEV-1381)
     const out = (await withCatalog['kairon.planWidgets'](
       { scored: s2(ALL_CHANGED, { 'stub-cash': cashData, 'stub-profit': profitData }) },
       ctxWith(scriptedLlm([JSON.stringify({ widgets: [] })])),
     )) as Out;
     expect([out.widgets['v1']?.map((w) => w.widget), out.instances['v1']]).toEqual([
-      ['matrix-diff', 'bars-before-after'],
+      [],
       [
         { widget: 'stub-cash', version: 2, spec: { widget: 'stub-cash', title: 'Cumulative cash', focus: NO_FOCUS }, data: cashData, provenance: 'kairon', buildId: STUB_BUILD_ID },
         { widget: 'stub-profit', version: 1, spec: { widget: 'stub-profit', title: 'Net profit', focus: NO_FOCUS }, data: profitData, provenance: 'kairon', buildId: STUB_BUILD_ID },
@@ -120,13 +108,13 @@ describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
     ]);
   });
 
-  it('takes the title the LLM gave, strips its focus, drops an unknown id and keeps the draws rule', async () => {
+  it('takes the title the LLM gave, strips its focus, drops an unknown id and keeps the goal check', async () => {
     // SCENARIO: the LLM names a catalog widget with its own title and a focus on ids it invented, one id nobody
-    //           knows, and no matrix-diff. The prompt carries no source, partner or line ids, so a focus from the
+    //           knows, and the goal check. The prompt carries no source, partner or line ids, so a focus from the
     //           LLM can only name unknown ones and hide rows (review I3)
-    // INPUT: specs: stub-cash «Деньги проекта» focused on source s1 and partner nobody; nope; bars-before-after
+    // INPUT: specs: stub-cash «Деньги проекта» focused on source s1 and partner nobody; nope; condition-check
     // EXPECTED: the stub-cash instance carries the LLM's title and an empty focus; stub-profit keeps its default
-    //           spec; nope is dropped; widgets are matrix-diff then bars
+    //           spec; nope is dropped; the own widgets are the goal check alone
     const reply = {
       widgets: [
         {
@@ -134,7 +122,7 @@ describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
           specs: [
             { widget: 'stub-cash', title: 'Деньги проекта', focus: { sourceIds: ['s1'], partnerIds: ['nobody'], lineCodes: [] } },
             { widget: 'nope', title: 'Неизвестный' },
-            { widget: 'bars-before-after', title: 'Было и стало', x: 'period', stack: 'sourceId', y: 'amountMinor', compare: ['parent', 'draft'], label: 'Δ' },
+            { widget: 'condition-check', title: 'Цель', goals: 'active' },
           ],
         },
       ],
@@ -142,7 +130,7 @@ describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
     const llm = scriptedLlm([JSON.stringify(reply)]);
     const out = (await withCatalog['kairon.planWidgets'](scoredAll, ctxWith(llm))) as Out;
     expect([out.widgets['v1']?.map((w) => w.widget), out.instances['v1']?.map((i) => i.spec), llm.complete.mock.calls.length]).toEqual([
-      ['matrix-diff', 'bars-before-after'],
+      ['condition-check'],
       [
         { widget: 'stub-cash', title: 'Деньги проекта', focus: NO_FOCUS },
         { widget: 'stub-profit', title: 'Net profit', focus: NO_FOCUS },
@@ -163,25 +151,13 @@ describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
     ]);
   });
 
-  it('keeps the default own specs when the reply holds catalog specs alone', async () => {
-    // SCENARIO: the LLM titled a catalog widget and named none of the service's own widgets (review minor 8)
+  it('gives no own widget when the reply holds catalog specs alone', async () => {
+    // SCENARIO: the LLM titled a catalog widget and named no goal check
     // INPUT: v1 changed the draws; specs: stub-cash «Деньги проекта» alone
-    // EXPECTED: widgets are the defaults of changed draws, matrix-diff then bars-before-after; the title is taken
+    // EXPECTED: no own widget; the title is taken
     const reply = { widgets: [{ id: 'v1', specs: [{ widget: 'stub-cash', title: 'Деньги проекта' }] }] };
     const out = (await withCatalog['kairon.planWidgets'](scoredAll, ctxWith(scriptedLlm([JSON.stringify(reply)])))) as Out;
-    expect([out.widgets['v1']?.map((w) => w.widget), out.instances['v1']?.map((i) => (i.spec as { title: string }).title)]).toEqual([
-      ['matrix-diff', 'bars-before-after'],
-      ['Деньги проекта', 'Net profit'],
-    ]);
-  });
-
-  it('keeps an own list the LLM left empty, as without a catalog', async () => {
-    // SCENARIO: the reply names the draft and gives it no spec at all; the draws rule alone applies, as before DEV-1380
-    // INPUT: v1 changed the draws; specs: []
-    // EXPECTED: matrix-diff alone
-    const reply = { widgets: [{ id: 'v1', specs: [] }] };
-    const out = (await withCatalog['kairon.planWidgets'](scoredAll, ctxWith(scriptedLlm([JSON.stringify(reply)])))) as Out;
-    expect(out.widgets['v1']?.map((w) => w.widget)).toEqual(['matrix-diff']);
+    expect([out.widgets['v1'], out.instances['v1']?.map((i) => (i.spec as { title: string }).title)]).toEqual([[], ['Деньги проекта', 'Net profit']]);
   });
 
   it('gives no instance to a widget whose paths did not change or whose data is missing', async () => {
@@ -199,8 +175,8 @@ describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
   it('offers the catalog widgets to the LLM in the prompt and in the schema', async () => {
     // SCENARIO: the prompt and the response schema are built from the manifest
     // INPUT: one ok draft, the stub catalog
-    // EXPECTED: the system prompt lists both stub widgets with what they read and never says «focus»; the spec
-    //           alternatives end with a catalog spec whose widget enum is the two ids and whose only properties
+    // EXPECTED: the system prompt lists both stub widgets with what they read and never says «focus»; the two spec
+    //           alternatives (the goal check, then the catalog) end with a catalog spec whose widget enum is the two ids and whose only properties
     //           are widget and title, both required (the package's schema also carries focus; review I3)
     const llm = scriptedLlm([JSON.stringify({ widgets: [] })]);
     await withCatalog['kairon.planWidgets']({ scored: s2(ALL_CHANGED, {}) }, ctxWith(llm));
@@ -220,7 +196,7 @@ describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
       alternatives.at(-1)?.properties.widget.enum,
       Object.keys(alternatives.at(-1)?.properties ?? {}),
       alternatives.at(-1)?.required,
-    ]).toEqual([true, true, false, 5, ['stub-cash', 'stub-profit'], ['widget', 'title'], ['widget', 'title']]);
+    ]).toEqual([true, true, false, 2, ['stub-cash', 'stub-profit'], ['widget', 'title'], ['widget', 'title']]);
   });
 });
 

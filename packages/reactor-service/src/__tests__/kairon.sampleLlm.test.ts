@@ -242,10 +242,10 @@ describe('kairon createSampleLLM, stage 5 demo phrases', () => {
     expect(variants.map((v) => [v.id, v.patch.scale])).toEqual([['v2.1', [{ lineCodes: ['R1'], fromMonth: '2026-09', factorPpm: 1_030_000 }]]]);
   });
 
-  it('leaves the widgets to the server defaults', async () => {
+  it('names no widget, so the server decides which catalog widgets a draft gets', async () => {
     // SCENARIO: the widgets step for the cover draft
     // INPUT: planWidgets request with the schema for v2.1
-    // EXPECTED: { widgets: [] }, valid: the server applies defaultWidgets
+    // EXPECTED: { widgets: [] }, valid
     const schema = widgetsJsonSchema(['v2.1']);
     const answer = await ask('planWidgets', 'DRAFTS:\nv2.1: funding.draws (14)', schema);
     expect(answer).toEqual({ widgets: [] });

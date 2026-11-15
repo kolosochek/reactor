@@ -1,8 +1,8 @@
 // packages/reactor-service/src/kairon/explain.ts
 //
 // The LLM steps after scoring (DEV-1364 stage 4, DEV-1375 stage 5):
-// - planWidgets: one call per batch picks declarative widget specs per draft;
-//   the server keeps the mandatory matrix-diff and falls back to the defaults;
+// - planWidgets: one call per batch names the goal check and titles catalog
+//   widgets per draft; the server assembles the catalog instances;
 // - explainVariants: the recommendation overview, from the business answer
 //   down to the figures, plus the verdict, gives, costs and stakeholders per
 //   draft and why the other drafts rank lower; the server rules, switches,
@@ -27,15 +27,7 @@ import {
 import { SWITCH_GOALS } from './ranking.js';
 import { literalNumbers, renderPlaceholders } from './summary.js';
 import type { WidgetCatalog, WidgetInstance } from './widgetCatalog.js';
-import {
-  catalogInstances,
-  defaultWidgets,
-  llmCatalogSpecSchema,
-  OWN_WIDGETS,
-  WidgetSpecSchema,
-  withMandatory,
-  type WidgetSpec,
-} from './widgets.js';
+import { catalogInstances, llmCatalogSpecSchema, OWN_WIDGETS, WidgetSpecSchema, type WidgetSpec } from './widgets.js';
 
 type LLMMessage = LLMCompletionRequest['messages'][number];
 
@@ -134,12 +126,7 @@ export async function planWidgets(
   });
   const chosen = new Map((answer.value ?? []).map((w) => [w.id, w]));
   const widgets: Record<string, WidgetSpec[]> = {};
-  for (const v of ok) {
-    const reply = chosen.get(v.id);
-    // A reply that holds catalog specs alone said nothing about the service's own widgets, so the defaults stay.
-    const silent = reply === undefined || (reply.specs.length === 0 && reply.catalogSpecs.length > 0);
-    widgets[v.id] = withMandatory(silent ? defaultWidgets(v.changed) : reply.specs, v.changed);
-  }
+  for (const v of ok) widgets[v.id] = chosen.get(v.id)?.specs ?? [];
   if (catalog === null) return { widgets };
   const instances: Record<string, WidgetInstance[]> = {};
   for (const v of ok) instances[v.id] = catalogInstances(catalog, v, chosen.get(v.id)?.catalogSpecs ?? []);

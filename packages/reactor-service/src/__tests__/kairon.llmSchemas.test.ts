@@ -126,10 +126,10 @@ describe('kairon explainJsonSchema', () => {
 });
 
 describe('kairon widgetsJsonSchema', () => {
-  it('passes the strict-mode rules and offers the four declarative widgets per variant id', () => {
-    // SCENARIO: the widgets step names a widget per changed path, never HTML or figures
+  it('passes the strict-mode rules and offers the goal check per variant id', () => {
+    // SCENARIO: the widgets step names a widget, never HTML or figures; the figures are catalog widgets (DEV-1381)
     // INPUT: ids v2.1, v2.2
-    // EXPECTED: no strict violations; id enum ["v2.1", "v2.2"]; spec alternatives matrix-diff, bars-before-after, condition-check, stakeholder-table
+    // EXPECTED: no strict violations; id enum ["v2.1", "v2.2"]; the one spec alternative is condition-check
     const schema = widgetsJsonSchema(['v2.1', 'v2.2']);
     expect(strictViolations(schema)).toEqual([]);
     type Widgets = {
@@ -142,12 +142,7 @@ describe('kairon widgetsJsonSchema', () => {
     };
     const item = (schema.properties.widgets as Widgets).items;
     expect(item.properties.id.enum).toEqual(['v2.1', 'v2.2']);
-    expect(item.properties.specs.items.anyOf.map((s) => s.properties.widget.enum[0])).toEqual([
-      'matrix-diff',
-      'bars-before-after',
-      'condition-check',
-      'stakeholder-table',
-    ]);
+    expect(item.properties.specs.items.anyOf.map((s) => s.properties.widget.enum[0])).toEqual(['condition-check']);
   });
 });
 

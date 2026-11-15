@@ -157,33 +157,12 @@ export function explainJsonSchema(variantIds: string[], parties: string[] = ['ba
 const literal = (value: string): JsonSchema => ({ type: 'string', enum: [value] });
 
 /**
- * kairon.planWidgets: per variant id, the declarative widget specs (widgets.ts WidgetSpecSchema).
+ * kairon.planWidgets: per variant id, the widget specs: the goal check (widgets.ts WidgetSpecSchema).
  * `catalogSpec` is the spec schema of the loaded widgets catalog (DEV-1380), offered as one more alternative.
  */
 export function widgetsJsonSchema(variantIds: string[], catalogSpec?: Record<string, unknown>): ProposalJsonSchema {
   const title: JsonSchema = { type: 'string', description: 'Russian widget title' };
-  const specs: JsonSchema[] = [
-    closed({
-      widget: literal('matrix-diff'),
-      title,
-      rows: literal('draws[].sourceId'),
-      cols: literal('draws[].period'),
-      value: literal('amountMinor'),
-      highlight: literal('changed'),
-      delta: literal('cell, row'),
-    }),
-    closed({
-      widget: literal('bars-before-after'),
-      title,
-      x: literal('period'),
-      stack: literal('sourceId'),
-      y: literal('amountMinor'),
-      compare: arrayOf({ type: 'string' }, 'Two sides: ["parent", "draft"]'),
-      label: { type: 'string', description: 'Russian label of the delta' },
-    }),
-    closed({ widget: literal('condition-check'), title, goals: literal('active') }),
-    closed({ widget: literal('stakeholder-table'), title, rows: arrayOf({ type: 'string' }, 'Party names') }),
-  ];
+  const specs: JsonSchema[] = [closed({ widget: literal('condition-check'), title, goals: literal('active') })];
   if (catalogSpec !== undefined) specs.push(catalogSpec as JsonSchema);
   return closed({
     widgets: arrayOf(

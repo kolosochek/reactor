@@ -68,7 +68,7 @@ export const kaironForecastTools: Tool[] = [
     name: 'kairon.planWidgets',
     inputSchema: kaironToolInputSchemas['kairon.planWidgets'] as Tool['inputSchema'],
     description:
-      'LLM picks declarative widget specs per draft from its changed paths; the server keeps the matrix-diff for changed draws and falls back to the defaults.',
+      'LLM names the goal check and titles catalog widgets per draft from its changed paths; the server assembles an instance of every catalog widget whose read paths changed.',
     category: 'transformation',
     type: 'latent',
   },
