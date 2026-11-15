@@ -41,8 +41,8 @@ export interface WidgetInstance {
   provenance: 'kairon' | 'llm';
   /**
    * The widgets build whose core.mjs cut `data`. The page mounts an instance only with the
-   * browser.mjs of the same build, so a saved session replayed after a rebuild draws with the
-   * page's own renderers.
+   * browser.mjs of the same build, so a saved session replayed after a rebuild shows a line
+   * that names the two builds in place of each figure.
    */
   buildId: string;
 }

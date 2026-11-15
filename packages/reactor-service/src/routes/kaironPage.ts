@@ -8,7 +8,8 @@
 // GET /kairon/demo-phrases - the phrases the sample model answers (Task 16).
 // GET /kairon/assets/widgets/browser.mjs - the forecast widgets bundle (DEV-1380),
 // read from the directory KAIRON_WIDGETS_DIST names; 404 when there is none, and
-// the page then draws with its own renderers. One fixed file, no path from the request.
+// the page then puts a line that names the cause where a figure would be. One fixed
+// file, no path from the request.
 // GET /kairon/widgets - whether a bundle exists and of which build, so the page
 // imports it only when it does and a missing bundle costs no failed request. A
 // build that does not load as a catalog answers as no bundle, with a warning in the log.

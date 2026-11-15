@@ -139,4 +139,3 @@ export function slimTraceEvent(type: string, payload: unknown): unknown {
   const { output, ...rest } = payload.solution;
   return { ...payload, solution: { ...(slim(rest, false) as Record<string, unknown>), output: slim(output, true) } };
 }
-
