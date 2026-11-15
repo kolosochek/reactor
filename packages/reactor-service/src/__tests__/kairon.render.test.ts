@@ -34,8 +34,9 @@ interface RenderModule {
     state: unknown,
     instances: unknown[],
     hostOf: (instance: unknown) => unknown,
-  ): Array<{ instance: unknown; host?: unknown; unmount?: () => void; cause?: string; line?: string }>;
+  ): Array<{ instance?: unknown; host?: unknown; unmount?: () => void; cause?: string; count?: number; line?: string }>;
   runFigureLine(out: unknown): string | null;
+  undatedMilestonesLine(scored: unknown): string | null;
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -628,14 +629,39 @@ describe('catalog widgets on the page (DEV-1380)', () => {
     ]);
   });
 
-  it('puts a line for every instance when the page has no bundle', () => {
-    // SCENARIO: the service runs with no KAIRON_WIDGETS_DIST and replays a run recorded with a catalog
-    // INPUT: two instances, no bundle
-    // EXPECTED: two lines naming the missing bundle; no mount
-    const state = render.bundleState({ bundle: null, buildId: null }, null);
-    expect(render.placeInstances(state, [kpi, cash], () => ({})).map((p) => p.line)).toEqual([
-      '«Показатели»: фигура не нарисована, сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась).',
-      '«Деньги»: фигура не нарисована, сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась).',
+  it('puts one line for the card when every instance fails for the same bundle or build cause', () => {
+    // SCENARIO: with no bundle, or a stale build, a card printed 14 identical lines (review M7b)
+    // INPUT: (a) two instances, no bundle; (b) three instances stamped b0 against the bundle b1
+    // EXPECTED: one line each, naming the count and the cause; no mount
+    const none = render.bundleState({ bundle: null, buildId: null }, null);
+    const { bundle, state } = loaded();
+    const stale = [kpi, need, cash].map((instance) => ({ ...instance, buildId: 'b0' }));
+    expect([
+      render.placeInstances(none, [kpi, cash], () => ({})).map((p) => [p.cause, p.count, p.line]),
+      render.placeInstances(state, stale, () => ({})).map((p) => [p.cause, p.count, p.line]),
+      bundle.calls,
+    ]).toEqual([
+      [['no-bundle', 2, 'Фигуры не нарисованы (2): сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась).']],
+      [['stale-build', 3, 'Фигуры не нарисованы (3): данные собраны сборкой b0, страница загрузила сборку b1.']],
+      [],
+    ]);
+  });
+
+  it('keeps a line per instance when the causes differ or there is one instance', () => {
+    // SCENARIO: one stale instance beside one the bundle draws; and a card with a single instance and no bundle
+    // INPUT: (a) kpi-tiles as is and cash-line stamped b0, the bundle b1; (b) cash-line alone, no bundle
+    // EXPECTED: (a) kpi-tiles mounted and one titled line for cash-line; (b) one titled line
+    const { state } = loaded();
+    const none = render.bundleState({ bundle: null, buildId: null }, null);
+    expect([
+      render.placeInstances(state, [kpi, { ...cash, buildId: 'b0' }], () => ({ host: true })).map((p) => [p.host, p.line]),
+      render.placeInstances(none, [cash], () => ({})).map((p) => p.line),
+    ]).toEqual([
+      [
+        [{ host: true }, undefined],
+        [undefined, '«Деньги»: фигура не нарисована, данные собраны сборкой b0, страница загрузила сборку b1.'],
+      ],
+      ['«Деньги»: фигура не нарисована, сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась).'],
     ]);
   });
 
@@ -653,13 +679,25 @@ describe('catalog widgets on the page (DEV-1380)', () => {
     expect(render.placeInstances(state, [cash], () => ({})).map((p) => [p.cause, p.line])).toEqual([['mount', '«Деньги»: фигура не нарисована, виджет не нарисовался: boom.']]);
   });
 
-  it('says once per run that it was made with no catalog', () => {
-    // SCENARIO: a run made with no widgets catalog has no instances at all, so its drafts show no figure
-    // INPUT: (a) a run whose widgets step returned specs alone; (b) a run with instances for v1
-    // EXPECTED: (a) the line; (b) null
-    expect([render.runFigureLine({ widgets: { widgets: { v1: [] } } }), render.runFigureLine({ widgets: { widgets: {}, instances: { v1: [] } } })]).toEqual([
+  it('says why a run has no figure at all', () => {
+    // SCENARIO: a run made with no widgets catalog has no instances; a stage 4 recording has no widgets step (review M7a)
+    // INPUT: (a) a run whose widgets step returned specs alone; (b) a run with no widgets step; (c) a run with instances
+    // EXPECTED: (a) made with no catalog; (b) the recording predates the catalog; (c) null
+    expect([render.runFigureLine({ widgets: { widgets: { v1: [] } } }), render.runFigureLine({}), render.runFigureLine({ widgets: { widgets: {}, instances: { v1: [] } } })]).toEqual([
       'Фигуры не нарисованы: прогон сделан без каталога виджетов (сервис работал без KAIRON_WIDGETS_DIST).',
+      'Фигуры не нарисованы: запись сделана до каталога виджетов.',
       null,
     ]);
+  });
+
+  it('names the milestones the widgets leave out for having no due date', () => {
+    // SCENARIO: Kairon serves a milestone with no due date; the widgets take dated ones only (review M1)
+    // INPUT: a scored run naming HANDOVER and SALES_END; one naming none; one made with no catalog
+    // EXPECTED: one line with both codes; null; null
+    expect([
+      render.undatedMilestonesLine({ undatedMilestones: ['HANDOVER', 'SALES_END'] }),
+      render.undatedMilestonesLine({ undatedMilestones: [] }),
+      render.undatedMilestonesLine({}),
+    ]).toEqual(['Вехи без срока не показаны в виджетах: HANDOVER, SALES_END.', null, null]);
   });
 });

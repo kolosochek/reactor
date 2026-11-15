@@ -501,11 +501,23 @@ export function instancesOf(out, variantId) {
 }
 
 /**
- * The line for a run made with no widgets catalog, whose drafts therefore have no instance at
- * all; null for a run that has instances.
+ * The line for a run whose drafts have no instance at all: a recording with no widgets step
+ * predates the catalog, one whose widgets step has no instances was made with no catalog. Null
+ * for a run that has instances.
  */
 export function runFigureLine(out) {
-  return (out.widgets || {}).instances ? null : 'Фигуры не нарисованы: прогон сделан без каталога виджетов (сервис работал без KAIRON_WIDGETS_DIST).';
+  if (!out.widgets) return 'Фигуры не нарисованы: запись сделана до каталога виджетов.';
+  return out.widgets.instances ? null : 'Фигуры не нарисованы: прогон сделан без каталога виджетов (сервис работал без KAIRON_WIDGETS_DIST).';
+}
+
+/**
+ * The line for the milestones a run's widgets leave out: the package takes dated milestones, so
+ * the service drops one with no due date and names its code in `scored.undatedMilestones`. Null
+ * when it names none.
+ */
+export function undatedMilestonesLine(scored) {
+  const codes = scored.undatedMilestones || [];
+  return codes.length ? `Вехи без срока не показаны в виджетах: ${codes.join(', ')}.` : null;
 }
 
 /**
@@ -558,11 +570,21 @@ export function figureLine(instance, problem) {
  * widgets a draft gets is the server's decision, and what the bundle draws is read from the
  * bundle's manifest. An instance the bundle draws is mounted into the element `hostOf(instance)`
  * makes and comes back as { instance, host, unmount }; any other comes back as
- * { instance, cause, line }, and the page shows the line where the figure would be.
+ * { instance, cause, line }, and the page shows the line where the figure would be. When no
+ * bundle or one stale build stops every instance of a card, the card gets one entry
+ * { cause, count, line } in place of a line per instance.
  */
 export function placeInstances(state, instances, hostOf) {
-  return instances.map((instance) => {
-    const problem = instanceProblem(state, instance);
+  const problems = instances.map((instance) => instanceProblem(state, instance));
+  const first = problems[0];
+  const shared =
+    instances.length > 1 &&
+    first &&
+    ['no-bundle', 'stale-build'].includes(first.cause) &&
+    problems.every((problem) => problem && problem.cause === first.cause && problem.text === first.text);
+  if (shared) return [{ cause: first.cause, count: instances.length, line: `Фигуры не нарисованы (${instances.length}): ${first.text}.` }];
+  return instances.map((instance, index) => {
+    const problem = problems[index];
     if (problem) return { instance, cause: problem.cause, line: figureLine(instance, problem) };
     const host = hostOf(instance);
     try {
@@ -632,11 +654,7 @@ table.k-m td.best { font-weight: 700; }
 .k-tile .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .k-tile .c { font-size: 11px; color: var(--text-secondary); }
 .k-tile .d { font-size: 12px; color: var(--text-secondary); }
-table.k-matrix td, table.k-matrix th { text-align: right; } table.k-matrix td:first-child, table.k-matrix th:first-child { text-align: left; }
-td.chg { background: color-mix(in srgb, #eda100 22%, transparent); } td.chg b { display: block; font-weight: 600; } td.chg small { color: var(--text-secondary); }
-td.same { color: var(--text-tertiary); } td.sum { white-space: nowrap; }
 tr.moved td { background: color-mix(in srgb, #eda100 10%, transparent); }
-.k-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .k-specd summary { font-size: 11px; color: var(--text-tertiary); cursor: pointer; margin-top: 4px; }
 .k-spec { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; background: var(--bg-primary); border-radius: 6px; padding: 5px 7px; margin: 4px 0 0; white-space: pre-wrap; color: var(--text-secondary); }
 .k-contrib { display: grid; grid-template-columns: 170px 262px 1fr; gap: 8px; align-items: center; font-size: 12px; padding: 2px 0; }
