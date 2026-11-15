@@ -472,14 +472,23 @@ describe('kairon render: session export', () => {
 });
 
 describe('catalog widgets on the page (DEV-1380)', () => {
-  const cash = { widget: 'cash-line', version: 1, buildId: 'b1', spec: { widget: 'cash-line', title: 'Деньги' }, data: { rows: 44 }, provenance: 'kairon' };
+  // cash-line is at version 2 since DEV-1388: series { subject, slot, read, points } in place of two point lists.
+  const cashSeries = (id: string, role: string, slot: number) => ({ subject: { id, label: id, role }, slot, read: 'loaded', points: [] });
+  const cash = {
+    widget: 'cash-line',
+    version: 2,
+    buildId: 'b1',
+    spec: { widget: 'cash-line', title: 'Деньги' },
+    data: { current: cashSeries('v1', 'draft', 1), baseline: [cashSeries('active', 'active', 0)], others: [] },
+    provenance: 'kairon',
+  };
   const kpi = { widget: 'kpi-tiles', version: 1, buildId: 'b1', spec: { widget: 'kpi-tiles', title: 'Показатели' }, data: { tiles: 5 }, provenance: 'kairon' };
   const need = { widget: 'need-rows', version: 1, buildId: 'b1', spec: { widget: 'need-rows', title: 'Потребность' }, data: { rows: 3 }, provenance: 'kairon' };
   const host = { id: 'host' };
 
   /**
    * A stand-in for the bundle of build b1: records what mount() was called with and counts unmounts.
-   * Its catalog carries three widgets at version 1 and refuses data that holds `broken`.
+   * Its catalog carries kpi-tiles and need-rows at version 1, cash-line at version 2, and refuses data that holds `broken`.
    */
   function fakeBundle() {
     const calls: unknown[][] = [];
@@ -491,7 +500,7 @@ describe('catalog widgets on the page (DEV-1380)', () => {
       catalog: {
         manifest: () => [
           { id: 'kpi-tiles', version: 1 },
-          { id: 'cash-line', version: 1 },
+          { id: 'cash-line', version: 2 },
           { id: 'need-rows', version: 1 },
         ],
         parseData: (id: string, data: { broken?: boolean }) => {
@@ -560,7 +569,7 @@ describe('catalog widgets on the page (DEV-1380)', () => {
       render.instanceProblem(render.bundleState({ bundle: null, buildId: null }, null), cash),
       render.instanceProblem(state, { ...cash, buildId: 'b0' }),
       render.instanceProblem(state, unstamped),
-      render.instanceProblem(state, { ...cash, version: 2 }),
+      render.instanceProblem(state, { ...cash, version: 1 }),
       render.instanceProblem(state, { ...cash, widget: 'nope' }),
       render.instanceProblem(state, { ...cash, data: { broken: true } }),
       render.instanceProblem(state, cash),
@@ -568,7 +577,7 @@ describe('catalog widgets on the page (DEV-1380)', () => {
       { cause: 'no-bundle', text: 'сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась)' },
       { cause: 'stale-build', text: 'данные собраны сборкой b0, страница загрузила сборку b1' },
       { cause: 'stale-build', text: 'данные собраны без отметки сборки, страница загрузила сборку b1' },
-      { cause: 'version', text: 'в данных версия виджета 2, в загруженной сборке 1' },
+      { cause: 'version', text: 'в данных версия виджета 1, в загруженной сборке 2' },
       { cause: 'version', text: 'в загруженной сборке нет виджета nope' },
       { cause: 'data', text: 'данные не проходят схему виджета' },
       null,
@@ -579,10 +588,10 @@ describe('catalog widgets on the page (DEV-1380)', () => {
     // SCENARIO: the page shows one line where the figure would be
     // INPUT: the cash instance titled «Деньги» and a version problem; an instance with no title
     // EXPECTED: the title in quotes, then the cause; the widget id stands in for a missing title
-    const problem = { cause: 'version', text: 'в данных версия виджета 2, в загруженной сборке 1' };
+    const problem = { cause: 'version', text: 'в данных версия виджета 1, в загруженной сборке 2' };
     expect([render.figureLine(cash, problem), render.figureLine({ widget: 'cash-line', spec: {} }, problem)]).toEqual([
-      '«Деньги»: фигура не нарисована, в данных версия виджета 2, в загруженной сборке 1.',
-      '«cash-line»: фигура не нарисована, в данных версия виджета 2, в загруженной сборке 1.',
+      '«Деньги»: фигура не нарисована, в данных версия виджета 1, в загруженной сборке 2.',
+      '«cash-line»: фигура не нарисована, в данных версия виджета 1, в загруженной сборке 2.',
     ]);
   });
 
@@ -610,7 +619,7 @@ describe('catalog widgets on the page (DEV-1380)', () => {
 
   it('puts a line in place of each instance it cannot draw and mounts the rest', () => {
     // SCENARIO: one instance is of a version the bundle lacks, one has broken data; the figures are the bundle's alone
-    // INPUT: kpi-tiles, cash-line at version 2, need-rows with broken data; the bundle b1
+    // INPUT: kpi-tiles, cash-line at version 1 (recorded before DEV-1388), need-rows with broken data; the bundle b1
     // EXPECTED: kpi-tiles mounted; a line with the cause for the other two, in the server's order; no host made for them
     const { state } = loaded();
     const hosts: string[] = [];
@@ -618,11 +627,11 @@ describe('catalog widgets on the page (DEV-1380)', () => {
       hosts.push((instance as { widget: string }).widget);
       return { hostOf: (instance as { widget: string }).widget };
     };
-    const placed = render.placeInstances(state, [kpi, { ...cash, version: 2 }, { ...need, data: { broken: true } }], hostOf);
+    const placed = render.placeInstances(state, [kpi, { ...cash, version: 1 }, { ...need, data: { broken: true } }], hostOf);
     expect([placed.map((p) => [p.host, p.cause, p.line]), hosts]).toEqual([
       [
         [{ hostOf: 'kpi-tiles' }, undefined, undefined],
-        [undefined, 'version', '«Деньги»: фигура не нарисована, в данных версия виджета 2, в загруженной сборке 1.'],
+        [undefined, 'version', '«Деньги»: фигура не нарисована, в данных версия виджета 1, в загруженной сборке 2.'],
         [undefined, 'data', '«Потребность»: фигура не нарисована, данные не проходят схему виджета.'],
       ],
       ['kpi-tiles'],

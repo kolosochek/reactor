@@ -118,14 +118,14 @@ describe('kairon slimTraceEvent (DEV-1381)', () => {
     ],
     ranking: ['v1'],
   };
-  const cash = { widget: 'cash-line', version: 1, buildId: 'b1', spec: { widget: 'cash-line', title: 'Деньги' }, data: cashData, provenance: 'kairon' };
+  const cash = { widget: 'cash-line', version: 2, buildId: 'b1', spec: { widget: 'cash-line', title: 'Деньги' }, data: cashData, provenance: 'kairon' };
   const kpi = { widget: 'kpi-tiles', version: 1, buildId: 'b1', spec: { widget: 'kpi-tiles', title: 'Показатели' }, data: kpiData, provenance: 'kairon' };
   const widgets = () => ({ widgets: { v1: [] }, instances: { v1: [cash, kpi] } });
   const slimWidgets = {
     widgets: { v1: [] },
     instances: {
       v1: [
-        { widget: 'cash-line', version: 1, buildId: 'b1', bytes: bytes(cash) },
+        { widget: 'cash-line', version: 2, buildId: 'b1', bytes: bytes(cash) },
         { widget: 'kpi-tiles', version: 1, buildId: 'b1', bytes: bytes(kpi) },
       ],
     },

@@ -139,7 +139,7 @@ describe('POST /kairon/run', () => {
     // EXPECTED: tool.end carries widgetDataBytes and no widgetData; run.done carries the instance in full and
     //           widgetDataBytes in output.scored
     const data = { points: [{ month: '2026-09', amountMinor: '-1' }] };
-    const instance = { widget: 'cash-line', version: 1, buildId: 'b1', spec: { widget: 'cash-line', title: 'Деньги' }, data, provenance: 'kairon' };
+    const instance = { widget: 'cash-line', version: 2, buildId: 'b1', spec: { widget: 'cash-line', title: 'Деньги' }, data, provenance: 'kairon' };
     const scored = { variants: [{ id: 'v1', widgetData: { 'cash-line': data } }] };
     const server = Fastify({ logger: false });
     registerKaironRunRoute(server, {

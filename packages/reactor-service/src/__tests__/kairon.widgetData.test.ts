@@ -182,21 +182,19 @@ describe.skipIf(REAL_DIST === '')('kairon.scoreVariants with the real widgets bu
   it('cuts every widget of the wave 1 build for S2 v1 against the active forecast', async () => {
     // SCENARIO: the page will draw v1 against Forecast v3 from this data (DEV-1381: 14 widgets)
     // INPUT: S2 v1, the build KAIRON_WIDGETS_DIST names
-    // EXPECTED: data for all 14 widgets and no error; cash-line: the header (CZK, closed 2026-08, v1 against
-    //           Forecast v3), 44 months on both sides, 2026-08 equal on both sides and 2026-09 lower for the
+    // EXPECTED: data for all 14 widgets and no error; cash-line version 2 (DEV-1388): CZK, closed 2026-08, v1
+    //           as the current series in slot 1, Forecast v3 as the one baseline series in slot 0, both loaded,
+    //           no other series; 44 months on both sides, 2026-08 equal on both sides and 2026-09 lower for the
     //           draft by 3 013 205,75 CZK; milestone-band: the active version's one milestone on the baseline, none
     //           on the draft, and a view whose shift is unknown; document.milestones is not among the changed paths
     const out = await score({ proposals: { variants: [draft('v1', V1_LINEAGE)] } }, () => loadWidgetCatalog({ KAIRON_WIDGETS_DIST: REAL_DIST }));
     const v1 = out.variants[0];
     type Point = { month: string; amountMinor: string };
-    const cash = (v1?.widgetData ?? {})['cash-line'] as {
-      currency: unknown;
-      closedThrough: unknown;
-      current: unknown;
-      baseline: unknown;
-      currentPoints: Point[];
-      baselinePoints: Point[];
-    };
+    type Series = { subject: unknown; slot: number; read: string; points: Point[] };
+    const cash = (v1?.widgetData ?? {})['cash-line'] as { currency: unknown; closedThrough: unknown; current: Series; baseline: Series[]; others: Series[] };
+    const header = (series: Series) => ({ subject: series.subject, slot: series.slot, read: series.read });
+    const currentPoints = cash.current.points;
+    const baselinePoints = cash.baseline.flatMap((series) => series.points);
     const at = (points: Point[], month: string) => points.find((p) => p.month === month)?.amountMinor;
     const band = (v1?.widgetData ?? {})['milestone-band'] as { milestones: Array<{ code: string }>; baselineMilestones: Array<{ code: string }> };
     const core = (await import(/* @vite-ignore */ pathToFileURL(join(REAL_DIST, 'core.mjs')).href)) as {
@@ -207,10 +205,10 @@ describe.skipIf(REAL_DIST === '')('kairon.scoreVariants with the real widgets bu
     expect({
       errors: v1?.widgetErrors,
       widgets: Object.keys(v1?.widgetData ?? {}).sort(),
-      header: [cash.currency, cash.closedThrough, cash.current, cash.baseline],
-      months: [cash.currentPoints.length, cash.baselinePoints.length],
-      august: [at(cash.currentPoints, '2026-08'), at(cash.baselinePoints, '2026-08')],
-      september: [at(cash.currentPoints, '2026-09'), at(cash.baselinePoints, '2026-09')],
+      header: [cash.currency, cash.closedThrough, header(cash.current), cash.baseline.map(header), cash.others],
+      months: [currentPoints.length, baselinePoints.length],
+      august: [at(currentPoints, '2026-08'), at(baselinePoints, '2026-08')],
+      september: [at(currentPoints, '2026-09'), at(baselinePoints, '2026-09')],
       milestones: [band.milestones.map((m) => m.code), band.baselineMilestones.map((m) => m.code)],
       shiftKnown: bandView.shiftKnown,
       milestonesChanged: v1?.changed.some((c) => c.path === 'document.milestones'),
@@ -232,7 +230,13 @@ describe.skipIf(REAL_DIST === '')('kairon.scoreVariants with the real widgets bu
         'share-mix',
         'signals',
       ],
-      header: [{ code: 'CZK', decimals: 2 }, ['2026-08'], { id: 'v1', label: 'v1', role: 'draft' }, [{ id: 'active', label: 'Forecast v3', role: 'active' }]],
+      header: [
+        { code: 'CZK', decimals: 2 },
+        ['2026-08'],
+        { subject: { id: 'v1', label: 'v1', role: 'draft' }, slot: 1, read: 'loaded' },
+        [{ subject: { id: 'active', label: 'Forecast v3', role: 'active' }, slot: 0, read: 'loaded' }],
+        [],
+      ],
       months: [44, 44],
       august: ['-34738050274', '-34738050274'],
       september: ['-37715335486', '-37414014911'],
@@ -240,5 +244,19 @@ describe.skipIf(REAL_DIST === '')('kairon.scoreVariants with the real widgets bu
       shiftKnown: false,
       milestonesChanged: false,
     });
+  });
+
+  it('puts a draft and its parent draft in the same cash-line slot', async () => {
+    // SCENARIO: the package dashes a baseline only on an equal slot; the reactor sets no slot, so a draft
+    //           against its parent draft relies on the package's default (DEV-1388)
+    // INPUT: v1.1 with parent v1, the build KAIRON_WIDGETS_DIST names
+    // EXPECTED: v1.1 as the current series and v1 as the one baseline series, both in slot 1 and loaded
+    const out = await score({ proposals: { variants: [draft('v1.1', V1_1_LINEAGE, 'v1')] }, parents: [{ id: 'v1', lineage: V1_LINEAGE }] }, () =>
+      loadWidgetCatalog({ KAIRON_WIDGETS_DIST: REAL_DIST }),
+    );
+    type Series = { subject: { id: string; role: string }; slot: number; read: string };
+    const cash = (out.variants[0]?.widgetData ?? {})['cash-line'] as { current: Series; baseline: Series[]; others: Series[] };
+    const header = (series: Series) => [series.subject.id, series.subject.role, series.slot, series.read];
+    expect([header(cash.current), cash.baseline.map(header), cash.others]).toEqual([['v1.1', 'draft', 1, 'loaded'], [['v1', 'draft', 1, 'loaded']], []]);
   });
 });
