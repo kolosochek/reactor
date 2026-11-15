@@ -42,7 +42,7 @@ export const catalog = {
     };
   },
   parseSpec(raw) {
-    if (raw === null || typeof raw !== 'object' || typeof raw.title !== 'string' || raw.title === '') throw new Error('the widget spec breaks its schema: title');
+    if (raw === null || typeof raw !== 'object' || typeof raw.title !== 'string') throw new Error('the widget spec breaks its schema: title');
     known(raw.widget);
     return { widget: raw.widget, title: raw.title, focus: raw.focus };
   },
@@ -50,8 +50,12 @@ export const catalog = {
   specJsonSchema(ids) {
     return {
       type: 'object',
-      properties: { widget: { type: 'string', enum: ids ?? WIDGETS.map((w) => w.id) }, title: { type: 'string' } },
-      required: ['widget', 'title'],
+      properties: {
+        widget: { type: 'string', enum: ids ?? WIDGETS.map((w) => w.id) },
+        title: { type: 'string' },
+        focus: { type: 'object', properties: { sourceIds: { type: 'array', items: { type: 'string' } } }, required: ['sourceIds'], additionalProperties: false },
+      },
+      required: ['widget', 'title', 'focus'],
       additionalProperties: false,
     };
   },
@@ -63,12 +67,24 @@ export interface StubDist {
   remove(): void;
 }
 
-/** Writes the stub build; `omit` leaves one file out and `manifestBuildId` states another build in manifest.json. */
-export function writeStubWidgetsDist(options: { omit?: 'core.mjs' | 'manifest.json' | 'browser.mjs'; manifestBuildId?: string } = {}): StubDist {
+export interface StubDistOptions {
+  /** Leaves one file out. */
+  omit?: 'core.mjs' | 'manifest.json' | 'browser.mjs';
+  /** States another build in manifest.json. */
+  manifestBuildId?: string;
+  /** Writes this text as manifest.json, e.g. a broken or `null` one. */
+  manifestText?: string;
+  /** Writes this text as core.mjs, e.g. one that does not parse. */
+  coreText?: string;
+}
+
+/** Writes the stub build, with the faults `options` asks for. */
+export function writeStubWidgetsDist(options: StubDistOptions = {}): StubDist {
   const dir = mkdtempSync(join(tmpdir(), 'kairon-widgets-'));
   const files: Record<string, string> = {
-    'core.mjs': CORE,
-    'manifest.json': JSON.stringify({ buildId: options.manifestBuildId ?? STUB_BUILD_ID, specVersion: 1, widgets: STUB_MANIFEST }),
+    'core.mjs': options.coreText ?? CORE,
+    'manifest.json':
+      options.manifestText ?? JSON.stringify({ buildId: options.manifestBuildId ?? STUB_BUILD_ID, specVersion: 1, widgets: STUB_MANIFEST }),
     'browser.mjs': 'export const buildId = "stub-build-1";\nexport function mount() { return () => {}; }\n',
   };
   for (const [name, text] of Object.entries(files)) {

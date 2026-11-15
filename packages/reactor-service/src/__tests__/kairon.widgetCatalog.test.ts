@@ -2,8 +2,11 @@
 // manifest.json of the widgets package, from the directory KAIRON_WIDGETS_DIST names. The package
 // lives outside this public repository; only JSON crosses the boundary.
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import type { ActivityContext, LLMCompletionRequest, LLMCompletionResponse, LLMProvider, ProgressEvent } from '@kolosochek/reactor-core';
+import { createKaironActivities } from '../kairon/activities.js';
 import { loadWidgetCatalog, widgetsDistDir } from '../kairon/widgetCatalog.js';
+import { baselineEvaluate, fakeKaironApi } from './_helpers/kaironFake.js';
 import { STUB_BUILD_ID, STUB_MANIFEST, writeStubWidgetsDist } from './_helpers/widgetsStub.js';
 
 const dist = writeStubWidgetsDist();
@@ -51,7 +54,8 @@ describe('loadWidgetCatalog', () => {
   it('cuts data for a draft against its parent and assembles an instance', async () => {
     // SCENARIO: the server hands two forecasts to a widget's select and wraps the data with a spec
     // INPUT: a draft with 3 months against an active forecast; spec { widget: stub-cash, title: Деньги }
-    // EXPECTED: the stub's data names both subjects; the instance carries the manifest version 2 and provenance kairon
+    // EXPECTED: the stub's data names both subjects; the instance carries the manifest version 2, provenance kairon
+    //           and the build id of the core that cut the data
     const catalog = await loadWidgetCatalog({ KAIRON_WIDGETS_DIST: dist.dir });
     if (catalog === null) throw new Error('the stub catalog did not load');
     const current = catalog.subject({ id: 'v1', label: 'v1', role: 'draft', ...snapshotOf(['2026-09', '2026-10', '2026-11']) });
@@ -72,6 +76,7 @@ describe('loadWidgetCatalog', () => {
         planLines: 1,
       },
       provenance: 'kairon',
+      buildId: STUB_BUILD_ID,
     });
   });
 
@@ -104,5 +109,89 @@ describe('loadWidgetCatalog', () => {
       `KAIRON_WIDGETS_DIST: manifest.json is of build other-build, core.mjs of build ${STUB_BUILD_ID}`,
     );
     mixed.remove();
+  });
+
+  it('names the variable when manifest.json is not a widgets manifest', async () => {
+    // SCENARIO: a build was interrupted while writing manifest.json, or the file holds something else (review minor 7)
+    // INPUT: (a) manifest.json cut mid-object; (b) manifest.json holding null
+    // EXPECTED: both reject with an error naming the variable and the file
+    const cut = writeStubWidgetsDist({ manifestText: '{"buildId": "stub-bu' });
+    const empty = writeStubWidgetsDist({ manifestText: 'null' });
+    await expect(loadWidgetCatalog({ KAIRON_WIDGETS_DIST: cut.dir })).rejects.toThrow(`KAIRON_WIDGETS_DIST: ${cut.dir}/manifest.json is not a widgets manifest: `);
+    await expect(loadWidgetCatalog({ KAIRON_WIDGETS_DIST: empty.dir })).rejects.toThrow(`KAIRON_WIDGETS_DIST: ${empty.dir}/manifest.json is not a widgets manifest: `);
+    cut.remove();
+    empty.remove();
+  });
+
+  it('names the variable when core.mjs does not load', async () => {
+    // SCENARIO: a partial build left a core.mjs that does not parse (review I4)
+    // INPUT: core.mjs holding half a statement
+    // EXPECTED: an error naming the variable and the file
+    const partial = writeStubWidgetsDist({ coreText: 'export const buildId = ' });
+    await expect(loadWidgetCatalog({ KAIRON_WIDGETS_DIST: partial.dir })).rejects.toThrow(`KAIRON_WIDGETS_DIST: ${partial.dir}/core.mjs does not load: `);
+    partial.remove();
+  });
+});
+
+describe('a run and the widgets build (DEV-1380 review, I4)', () => {
+  const ROUTE_INPUT = { message: 'Что с банком?', drafts: [{ id: 'v1', title: 'Только задержка' }], selected: null };
+  const ROUTE_REPLY = '{"kind":"question","scope":[]}';
+  const SCORED = { scored: { variants: [{ id: 'v1', status: 'ok', changed: [{ path: 'funding.draws', cells: 14 }], widgetData: null }] } };
+
+  /** A run's context that records, in order, each widgets warning and each LLM call. */
+  function recorded(replies: string[]) {
+    const order: string[] = [];
+    const warnings: unknown[] = [];
+    const queue = [...replies];
+    const complete = vi.fn<[LLMCompletionRequest], Promise<LLMCompletionResponse>>(async () => {
+      order.push('llm');
+      return { content: queue.shift() ?? '{}', model: 'scripted' };
+    });
+    const llm: LLMProvider = { name: 'scripted', complete };
+    const ctx: ActivityContext = {
+      state: {},
+      llm,
+      onProgress: (event: ProgressEvent) => {
+        if (event.type !== 'kairon.widgets.warning') return;
+        order.push('warning');
+        warnings.push(event.payload);
+      },
+    };
+    return { ctx, order, warnings };
+  }
+
+  it('warns once before the first LLM call and runs with no catalog when the build is broken', async () => {
+    // SCENARIO: KAIRON_WIDGETS_DIST names a directory with no core.mjs; the run must not fail after paid LLM calls
+    // INPUT: one set of activities over that directory; kairon.route, then kairon.planWidgets, on one context
+    // EXPECTED: one warning that names the variable, emitted before the first LLM call; the route answers as it
+    //           does with no catalog; the widgets step returns specs alone, with no instances key
+    const broken = writeStubWidgetsDist({ omit: 'core.mjs' });
+    const activities = createKaironActivities(fakeKaironApi(baselineEvaluate), () => loadWidgetCatalog({ KAIRON_WIDGETS_DIST: broken.dir }));
+    const run = recorded([ROUTE_REPLY, JSON.stringify({ widgets: [] })]);
+    const routed = await activities['kairon.route'](ROUTE_INPUT, run.ctx);
+    const planned = await activities['kairon.planWidgets'](SCORED, run.ctx);
+    expect([run.order, run.warnings, routed, Object.keys(planned as object)]).toEqual([
+      ['warning', 'llm', 'llm'],
+      [{ message: `KAIRON_WIDGETS_DIST: ${broken.dir} has no core.mjs; run "npm run build" in the widgets package. The run goes on with no catalog widgets.` }],
+      { kind: 'question', scope: [], error: null },
+      ['widgets'],
+    ]);
+    broken.remove();
+  });
+
+  it('loads a working build before the first LLM call, once per set of activities, with no warning', async () => {
+    // SCENARIO: the catalog is loaded up front so a fault shows before any LLM call is paid for
+    // INPUT: a loader over the stub build that records each call; kairon.route, then kairon.planWidgets
+    // EXPECTED: one load, before the first LLM call; no warning; the widgets step returns instances
+    const loads: string[] = [];
+    const run = recorded([ROUTE_REPLY, JSON.stringify({ widgets: [] })]);
+    const activities = createKaironActivities(fakeKaironApi(baselineEvaluate), () => {
+      run.order.push('load');
+      loads.push('load');
+      return loadWidgetCatalog({ KAIRON_WIDGETS_DIST: dist.dir });
+    });
+    await activities['kairon.route'](ROUTE_INPUT, run.ctx);
+    const planned = await activities['kairon.planWidgets'](SCORED, run.ctx);
+    expect([run.order, loads.length, run.warnings, Object.keys(planned as object)]).toEqual([['load', 'llm', 'llm'], 1, [], ['widgets', 'instances']]);
   });
 });

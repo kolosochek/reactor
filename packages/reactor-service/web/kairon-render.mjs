@@ -638,14 +638,35 @@ export function instancesOf(out, variantId) {
 }
 
 /**
+ * The imported bundle, when it is of the build the service stated in GET /kairon/widgets; null
+ * otherwise. The service cuts widget data with core.mjs of one build, so a browser.mjs of another
+ * build (a stale file, a half-finished rebuild) may read that data differently.
+ */
+export function acceptBundle(module, info) {
+  if (!module || typeof module.mount !== 'function') return null;
+  return info && typeof info.buildId === 'string' && module.buildId === info.buildId ? module : null;
+}
+
+/** Whether `bundle` draws `instance`: same build, the widget at the instance's version, data that parses. */
+function bundleDraws(bundle, instance) {
+  if (!bundle.catalog || typeof bundle.buildId !== 'string' || instance.buildId !== bundle.buildId) return false;
+  const known = bundle.catalog.manifest().find((entry) => entry.id === instance.widget);
+  if (!known || known.version !== instance.version) return false;
+  bundle.catalog.parseData(instance.widget, instance.data);
+  return true;
+}
+
+/**
  * Mounts a catalog instance into `host` and returns the function that removes it. Returns null
- * when the bundle is not loaded, the draft has no such instance or the bundle fails: the caller
- * then draws with the page's own renderer.
+ * when the bundle is not loaded, the draft has no such instance, the instance was assembled by
+ * another build (a session replayed after a rebuild carries the old build id, a session recorded
+ * before the stamp carries none), its version or data does not fit the bundle, or the bundle
+ * fails: the caller then draws with the page's own renderer, so the figure stays on the page.
  */
 export function mountInstance(host, bundle, instance) {
   if (!bundle || typeof bundle.mount !== 'function' || !instance) return null;
   try {
-    return bundle.mount(host, instance, { locale: 'ru' });
+    return bundleDraws(bundle, instance) ? bundle.mount(host, instance, { locale: 'ru' }) : null;
   } catch {
     return null;
   }

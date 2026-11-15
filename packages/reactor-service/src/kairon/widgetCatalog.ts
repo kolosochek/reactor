@@ -13,7 +13,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 
-const ENV_NAME = 'KAIRON_WIDGETS_DIST';
+export const WIDGETS_DIST_ENV = 'KAIRON_WIDGETS_DIST';
+const ENV_NAME = WIDGETS_DIST_ENV;
 
 export interface WidgetManifestEntry {
   id: string;
@@ -38,6 +39,12 @@ export interface WidgetInstance {
   spec: CatalogSpec;
   data: unknown;
   provenance: 'kairon' | 'llm';
+  /**
+   * The widgets build whose core.mjs cut `data`. The page mounts an instance only with the
+   * browser.mjs of the same build, so a saved session replayed after a rebuild draws with the
+   * page's own renderers.
+   */
+  buildId: string;
 }
 
 /** A forecast as a widget's select reads it; `snapshot` is opaque to this service. */
@@ -92,7 +99,7 @@ interface CoreModule {
   catalog: {
     selectData(id: string, input: unknown): unknown;
     parseSpec(raw: unknown): CatalogSpec;
-    instance(spec: CatalogSpec, data: unknown): WidgetInstance;
+    instance(spec: CatalogSpec, data: unknown): Omit<WidgetInstance, 'buildId'>;
     specJsonSchema(ids: string[]): Record<string, unknown>;
   };
 }
@@ -118,16 +125,33 @@ export function widgetsDistDir(env: Record<string, string | undefined>): string 
   return dir === '' ? null : dir;
 }
 
+/** manifest.json of the build, or an error that names the variable when the file is cut short or holds something else. */
+function readManifest(dir: string): z.infer<typeof ManifestFile> {
+  const file = join(dir, 'manifest.json');
+  try {
+    return ManifestFile.parse(JSON.parse(readFileSync(file, 'utf8')));
+  } catch (err) {
+    throw new Error(`${ENV_NAME}: ${file} is not a widgets manifest: ${messageOf(err)}`);
+  }
+}
+
+/**
+ * The catalog of the build KAIRON_WIDGETS_DIST names; null when the variable is unset. Every fault
+ * of the build (a missing file, a manifest that does not parse, a core that does not load or is of
+ * another build) rejects with a message that starts with the variable's name.
+ */
 export async function loadWidgetCatalog(env: Record<string, string | undefined>): Promise<WidgetCatalog | null> {
   const dir = widgetsDistDir(env);
   if (dir === null) return null;
   for (const file of ['core.mjs', 'manifest.json']) {
     if (!existsSync(join(dir, file))) throw new Error(`${ENV_NAME}: ${dir} has no ${file}; run "npm run build" in the widgets package`);
   }
-  const manifest = ManifestFile.parse(JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')));
+  const manifest = readManifest(dir);
   // The build id in the query makes a rebuilt core load afresh in a process that already imported an older one.
   const url = `${pathToFileURL(join(dir, 'core.mjs')).href}?build=${encodeURIComponent(manifest.buildId)}`;
-  const core: unknown = await import(/* @vite-ignore */ url);
+  const core: unknown = await import(/* @vite-ignore */ url).catch((err: unknown) => {
+    throw new Error(`${ENV_NAME}: ${join(dir, 'core.mjs')} does not load: ${messageOf(err)}`);
+  });
   if (!isCoreModule(core)) throw new Error(`${ENV_NAME}: core.mjs does not export buildId, parseSnapshot and catalog`);
   if (core.buildId !== manifest.buildId) {
     throw new Error(`${ENV_NAME}: manifest.json is of build ${manifest.buildId}, core.mjs of build ${core.buildId}`);
@@ -144,7 +168,7 @@ export async function loadWidgetCatalog(env: Record<string, string | undefined>)
     }),
     selectData: (id, input) => core.catalog.selectData(id, input),
     parseSpec: (raw) => core.catalog.parseSpec(raw),
-    instance: (spec, data) => core.catalog.instance(spec, data),
+    instance: (spec, data) => ({ ...core.catalog.instance(spec, data), buildId: core.buildId }),
     specJsonSchema: (ids) => core.catalog.specJsonSchema(ids),
   };
 }
@@ -181,7 +205,12 @@ export function cutWidgetData(
   return { data, errors };
 }
 
-/** A loader that reads the environment once; the service shares one catalog across runs. */
+/**
+ * A loader that loads once and hands the same result to every later call. The service builds a
+ * reactor, and with it one of these loaders, for every POST /kairon/run, so each run reads the
+ * build afresh and a rebuilt dist is picked up by the next run without a restart. core.mjs itself
+ * is imported once per build id (Node caches the module by its URL).
+ */
 export function lazyWidgetCatalog(env: Record<string, string | undefined> = process.env): () => Promise<WidgetCatalog | null> {
   let loaded: Promise<WidgetCatalog | null> | null = null;
   return () => {

@@ -27,7 +27,16 @@ import {
 import { SWITCH_GOALS } from './ranking.js';
 import { literalNumbers, renderPlaceholders } from './summary.js';
 import type { WidgetCatalog, WidgetInstance } from './widgetCatalog.js';
-import { catalogInstances, defaultWidgets, OWN_WIDGETS, WidgetSpecSchema, withMandatory, type ChangedPath, type WidgetSpec } from './widgets.js';
+import {
+  catalogInstances,
+  defaultWidgets,
+  llmCatalogSpecSchema,
+  OWN_WIDGETS,
+  WidgetSpecSchema,
+  withMandatory,
+  type ChangedPath,
+  type WidgetSpec,
+} from './widgets.js';
 
 type LLMMessage = LLMCompletionRequest['messages'][number];
 
@@ -108,7 +117,7 @@ export async function planWidgets(
   if (ok.length === 0) return catalog === null ? { widgets: {} } : { widgets: {}, instances: {} };
   const ids = ok.map((v) => v.id);
   const catalogIds = catalog === null ? [] : catalog.manifest.map((entry) => entry.id);
-  const schema = widgetsJsonSchema(ids, catalog !== null && catalogIds.length > 0 ? catalog.specJsonSchema(catalogIds) : undefined);
+  const schema = widgetsJsonSchema(ids, catalog !== null && catalogIds.length > 0 ? llmCatalogSpecSchema(catalog, catalogIds) : undefined);
   const answer = await askStructured<ChosenWidgets[]>(ctx, {
     system: widgetsSystemPrompt(catalog === null ? [] : catalog.manifest),
     user: widgetsUserPrompt(ok),
@@ -126,7 +135,12 @@ export async function planWidgets(
   });
   const chosen = new Map((answer.value ?? []).map((w) => [w.id, w]));
   const widgets: Record<string, WidgetSpec[]> = {};
-  for (const v of ok) widgets[v.id] = withMandatory(chosen.get(v.id)?.specs ?? defaultWidgets(v.changed), v.changed);
+  for (const v of ok) {
+    const reply = chosen.get(v.id);
+    // A reply that holds catalog specs alone said nothing about the service's own widgets, so the defaults stay.
+    const silent = reply === undefined || (reply.specs.length === 0 && reply.catalogSpecs.length > 0);
+    widgets[v.id] = withMandatory(silent ? defaultWidgets(v.changed) : reply.specs, v.changed);
+  }
   if (catalog === null) return { widgets };
   const instances: Record<string, WidgetInstance[]> = {};
   for (const v of ok) instances[v.id] = catalogInstances(catalog, v, chosen.get(v.id)?.catalogSpecs ?? []);

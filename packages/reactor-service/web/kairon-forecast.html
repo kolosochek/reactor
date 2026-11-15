@@ -936,6 +936,8 @@ svg text { font-size: 11px; }
         } else if (ev.type === 'llm.error') {
           const s = streams.get(p.callId);
           if (s) { s.head.textContent += '  ошибка ' + p.status; s.text.textContent = p.body; }
+        } else if (ev.type === 'kairon.widgets.warning') {
+          live.appendChild(el('div', { class: 'warnbox', text: 'Сборка виджетов не загрузилась, карточки рисуются собственными блоками страницы. ' + p.message }));
         }
         status.textContent = 'Идёт выполнение: t=' + ms(ev.t) + (firstToken !== null ? ', первый токен LLM на t=' + ms(firstToken) : '');
       }
@@ -947,12 +949,13 @@ svg text { font-size: 11px; }
     const calls = [];
     let current = null;
     events.forEach((ev) => {
-      if (ev.type === 'tool.start') { current = { start: ev, end: null, llm: [], kairon: [], attempts: [] }; calls.push(current); return; }
+      if (ev.type === 'tool.start') { current = { start: ev, end: null, llm: [], kairon: [], attempts: [], warnings: [] }; calls.push(current); return; }
       if (!current) return;
       if (ev.type === 'tool.end' || ev.type === 'tool.error') { current.end = ev; current = null; return; }
       if (ev.type === 'kairon.call') current.kairon.push(ev);
       if (ev.type === 'llm.request') current.llm.push(ev.payload.callId);
       if (ev.type === 'kairon.propose.attempt') current.attempts.push(ev.payload);
+      if (ev.type === 'kairon.widgets.warning') current.warnings.push(ev.payload.message);
     });
     return calls;
   }
@@ -1057,7 +1060,7 @@ svg text { font-size: 11px; }
         lazyJson('Аргументы (после подстановки †state)', p.args),
         end && c.end.type === 'tool.end' ? lazyJson('Результат (output → state)', end.output) : null,
         c.attempts.length ? lazyJson('Попытки LLM и ошибки проверки', c.attempts) : null
-      ]);
+      ].concat(c.warnings.map((w) => el('div', { class: 'warnbox', text: 'Сборка виджетов не загрузилась: ' + w }))));
       if (c.llm.length) {
         const sub = el('details', {}, [el('summary', { text: 'Вызовы LLM внутри (' + c.llm.length + ')' })]);
         c.llm.forEach((id) => { const lc = llms.find((x) => x.callId === id); if (lc) sub.appendChild(renderLlmCall(lc)); });
@@ -1184,8 +1187,11 @@ svg text { font-size: 11px; }
   });
   // The forecast widgets bundle (DEV-1380): present only when the service runs with KAIRON_WIDGETS_DIST.
   // WIDGETS stays null without it, and every catalog widget then falls back to the page's own renderer.
-  const widgetsReady = fetch(API + '/kairon/widgets').then((r) => r.json())
-    .then((info) => info.bundle ? import(API + info.bundle + '?build=' + encodeURIComponent(info.buildId || '')) : null)
+  // A bundle of another build than the service states is dropped too (R.acceptBundle).
+  const widgetsReady = Promise.all([renderReady, fetch(API + '/kairon/widgets').then((r) => r.json())])
+    .then(([, info]) => info.bundle
+      ? import(API + info.bundle + '?build=' + encodeURIComponent(info.buildId || '')).then((m) => R.acceptBundle(m, info))
+      : null)
     .then((m) => { WIDGETS = m; })
     .catch(() => { WIDGETS = null; });
   fetch(API + '/kairon/demo-phrases').then((r) => r.json()).then((j) => {

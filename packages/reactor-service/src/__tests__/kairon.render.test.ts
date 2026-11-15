@@ -29,6 +29,7 @@ interface RenderModule {
   sessionExport(session: unknown, meta: unknown): unknown;
   instancesOf(out: unknown, variantId: string): Map<string, unknown>;
   mountInstance(host: unknown, bundle: unknown, instance: unknown): (() => void) | null;
+  acceptBundle(module: unknown, info: unknown): unknown;
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -492,17 +493,31 @@ describe('kairon render: session export', () => {
 });
 
 describe('catalog widgets on the page (DEV-1380)', () => {
-  const cash = { widget: 'cash-line', version: 1, spec: { widget: 'cash-line', title: 'Деньги' }, data: { rows: 44 }, provenance: 'kairon' };
-  const kpi = { widget: 'kpi-tiles', version: 1, spec: { widget: 'kpi-tiles', title: 'Показатели' }, data: { tiles: 5 }, provenance: 'kairon' };
+  const cash = { widget: 'cash-line', version: 1, buildId: 'b1', spec: { widget: 'cash-line', title: 'Деньги' }, data: { rows: 44 }, provenance: 'kairon' };
+  const kpi = { widget: 'kpi-tiles', version: 1, buildId: 'b1', spec: { widget: 'kpi-tiles', title: 'Показатели' }, data: { tiles: 5 }, provenance: 'kairon' };
   const host = { id: 'host' };
 
-  /** A stand-in for the bundle: records what mount() was called with and counts unmounts. */
+  /**
+   * A stand-in for the bundle of build b1: records what mount() was called with and counts unmounts.
+   * Its catalog carries both widgets at version 1 and refuses data that holds `broken`.
+   */
   function fakeBundle() {
     const calls: unknown[][] = [];
     let unmounted = 0;
     return {
       calls,
       unmounted: () => unmounted,
+      buildId: 'b1',
+      catalog: {
+        manifest: () => [
+          { id: 'kpi-tiles', version: 1 },
+          { id: 'cash-line', version: 1 },
+        ],
+        parseData: (id: string, data: { broken?: boolean }) => {
+          if (data.broken === true) throw new Error(`widget "${id}" got data that breaks its schema`);
+          return data;
+        },
+      },
       mount: (...args: unknown[]) => {
         calls.push(args);
         return () => {
@@ -556,10 +571,60 @@ describe('catalog widgets on the page (DEV-1380)', () => {
     // INPUT: a bundle whose mount throws
     // EXPECTED: null
     const broken = {
+      ...fakeBundle(),
       mount: () => {
         throw new Error('boom');
       },
     };
     expect(render.mountInstance(host, broken, cash)).toBeNull();
+  });
+
+  it('refuses an instance assembled by another build, or by none', () => {
+    // SCENARIO: a session recorded on one widgets build replays on a page that loaded a rebuilt bundle (review I1)
+    // INPUT: the bundle of build b1; the cash instance stamped b0; the cash instance with no stamp
+    // EXPECTED: null for both and no mount call, so the page's own renderer draws
+    const bundle = fakeBundle();
+    const { buildId: _stamp, ...unstamped } = cash;
+    expect([render.mountInstance(host, bundle, { ...cash, buildId: 'b0' }), render.mountInstance(host, bundle, unstamped), bundle.calls]).toEqual([null, null, []]);
+  });
+
+  it('refuses an instance whose version the bundle does not carry', () => {
+    // SCENARIO: the instance states a widget version the loaded bundle does not draw (review I2, scenario E)
+    // INPUT: the bundle with cash-line at version 1; the cash instance at version 2; an instance of a widget the bundle lacks
+    // EXPECTED: null for both and no mount call: the figure stays on the page through its own renderer
+    const bundle = fakeBundle();
+    expect([
+      render.mountInstance(host, bundle, { ...cash, version: 2 }),
+      render.mountInstance(host, bundle, { ...cash, widget: 'need-rows' }),
+      bundle.calls,
+    ]).toEqual([null, null, []]);
+  });
+
+  it('refuses an instance whose data breaks the widget schema', () => {
+    // SCENARIO: the instance data does not parse in the loaded bundle (review I2, scenario F)
+    // INPUT: the cash instance with data the bundle's parseData throws on
+    // EXPECTED: null and no mount call
+    const bundle = fakeBundle();
+    expect([render.mountInstance(host, bundle, { ...cash, data: { broken: true } }), bundle.calls]).toEqual([null, []]);
+  });
+
+  it('refuses every instance when the bundle has no catalog to check against', () => {
+    // SCENARIO: a bundle that exports mount alone cannot state its build, versions or data schema
+    // INPUT: a bundle with mount and no buildId or catalog
+    // EXPECTED: null
+    expect(render.mountInstance(host, { mount: () => () => {} }, cash)).toBeNull();
+  });
+
+  it('accepts the bundle of the build the service states and no other', () => {
+    // SCENARIO: the page imported browser.mjs; the service's GET /kairon/widgets stated a build id (review I1)
+    // INPUT: (a) the bundle b1 with info b1; (b) the bundle b1 with info b2; (c) a module with no mount; (d) no module
+    // EXPECTED: (a) the bundle itself; (b), (c), (d) null, so WIDGETS stays null and the page's renderers draw
+    const bundle = fakeBundle();
+    expect([
+      render.acceptBundle(bundle, { bundle: '/x', buildId: 'b1' }) === bundle,
+      render.acceptBundle(bundle, { bundle: '/x', buildId: 'b2' }),
+      render.acceptBundle({ buildId: 'b1' }, { bundle: '/x', buildId: 'b1' }),
+      render.acceptBundle(null, { bundle: null, buildId: null }),
+    ]).toEqual([true, null, null, null]);
   });
 });

@@ -10,7 +10,8 @@
 // read from the directory KAIRON_WIDGETS_DIST names; 404 when there is none, and
 // the page then draws with its own renderers. One fixed file, no path from the request.
 // GET /kairon/widgets - whether a bundle exists and of which build, so the page
-// imports it only when it does and a missing bundle costs no failed request.
+// imports it only when it does and a missing bundle costs no failed request. A
+// build that does not load as a catalog answers as no bundle, with a warning in the log.
 
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -18,7 +19,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import { DEMO_PHRASES } from '../kairon/sampleLlm.js';
-import { widgetsDistDir } from '../kairon/widgetCatalog.js';
+import { loadWidgetCatalog, widgetsDistDir } from '../kairon/widgetCatalog.js';
 
 const PAGE = fileURLToPath(new URL('../../web/kairon-forecast.html', import.meta.url));
 const RENDER = fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url));
@@ -33,11 +34,15 @@ export function registerKaironPageRoute(app: FastifyInstance): void {
   app.get('/kairon/assets/kairon-render.mjs', async (_request, reply) =>
     reply.type('text/javascript; charset=utf-8').send(await readFile(RENDER, 'utf8')),
   );
-  app.get('/kairon/widgets', async () => {
-    const dir = widgetsDistDir(process.env);
-    if (dir === null || !existsSync(join(dir, WIDGETS_BUNDLE)) || !existsSync(join(dir, 'manifest.json'))) return { bundle: null, buildId: null };
-    const manifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as { buildId?: unknown };
-    return { bundle: `/kairon/assets/widgets/${WIDGETS_BUNDLE}`, buildId: typeof manifest.buildId === 'string' ? manifest.buildId : null };
+  app.get('/kairon/widgets', async (request) => {
+    const none = { bundle: null, buildId: null };
+    // The same load a run does: a build the run cannot use is one the page must not mount either.
+    const catalog = await loadWidgetCatalog(process.env).catch((err: unknown) => {
+      request.log.warn(err instanceof Error ? err.message : String(err));
+      return null;
+    });
+    if (catalog === null || !existsSync(join(catalog.dir, WIDGETS_BUNDLE))) return none;
+    return { bundle: `/kairon/assets/widgets/${WIDGETS_BUNDLE}`, buildId: catalog.buildId };
   });
   app.get('/kairon/assets/widgets/browser.mjs', async (_request, reply) => {
     const dir = widgetsDistDir(process.env);

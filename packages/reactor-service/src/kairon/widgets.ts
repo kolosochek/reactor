@@ -214,20 +214,25 @@ export function defaultCatalogSpec(entry: Pick<WidgetManifestEntry, 'id' | 'titl
   return { widget: entry.id, title: CATALOG_TITLES_RU[entry.id] ?? entry.title, focus: { sourceIds: [], partnerIds: [], lineCodes: [] } };
 }
 
-const Ids = z.array(z.string()).default([]);
-// normalizeStrictAnswer drops empty lists, so a focus arrives with its empty lists missing.
-const LlmCatalogSpec = z.object({
-  widget: z.string(),
-  title: z.string(),
-  focus: z.object({ sourceIds: Ids, partnerIds: Ids, lineCodes: Ids }).default({}),
-});
+// The LLM gives a widget and a title. Its prompt lists no source, partner or line ids, so a focus
+// from it names ids that do not exist and the widget hides every row (DEV-1380 review, I3).
+// z.object drops the key from a reply that still carries one; the server writes an empty focus.
+const LlmCatalogSpec = z.object({ widget: z.string(), title: z.string() });
 
-/** A spec the LLM gave, as the package validates it; null for an unknown widget or a broken spec. */
+/** The spec schema offered to the LLM: the package's spec without `focus`. */
+export function llmCatalogSpecSchema(catalog: WidgetCatalog, ids: string[]): Record<string, unknown> {
+  const schema = catalog.specJsonSchema(ids);
+  const { focus: _focus, ...properties } = (schema.properties ?? {}) as Record<string, unknown>;
+  const required = Array.isArray(schema.required) ? schema.required.filter((key) => key !== 'focus') : [];
+  return { ...schema, properties, required };
+}
+
+/** A spec the LLM gave, as the package validates it; null for an unknown widget, a blank title or a broken spec. */
 function llmCatalogSpec(catalog: WidgetCatalog, raw: unknown): CatalogSpec | null {
   const parsed = LlmCatalogSpec.safeParse(raw);
-  if (!parsed.success) return null;
+  if (!parsed.success || parsed.data.title.trim() === '') return null;
   try {
-    return catalog.parseSpec(parsed.data);
+    return catalog.parseSpec({ ...parsed.data, focus: { sourceIds: [], partnerIds: [], lineCodes: [] } });
   } catch {
     return null;
   }
@@ -236,7 +241,8 @@ function llmCatalogSpec(catalog: WidgetCatalog, raw: unknown): CatalogSpec | nul
 /**
  * The catalog widgets of one scored draft, in manifest order. The server decides which ones: a
  * widget is drawn when the draft's scoring cut its data and one of the paths it reads changed.
- * The LLM's spec gives the title and the focus; the default spec fills in when it gave none.
+ * The LLM's spec gives the title; the default spec fills in when it gave none or a blank one.
+ * Each instance carries the build id of the catalog that cut its data (WidgetCatalog.instance).
  */
 export function catalogInstances(
   catalog: WidgetCatalog,

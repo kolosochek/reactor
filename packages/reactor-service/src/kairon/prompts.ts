@@ -260,7 +260,7 @@ export function widgetsSystemPrompt(catalog: Array<{ id: string; whenToUse: stri
   const catalogBlock =
     catalog.length === 0
       ? ''
-      : `CATALOG WIDGETS: the server draws one for a draft when a path it reads changed. You may add a spec {"widget", "title", "focus": {"sourceIds": [], "partnerIds": [], "lineCodes": []}} to give it a Russian title or to narrow its rows; empty focus lists show everything.
+      : `CATALOG WIDGETS: the server draws one for a draft when a path it reads changed. You may add a spec {"widget", "title"} to give it a Russian title.
 ${catalog.map((w) => `- ${w.id}: ${w.whenToUse} Reads: ${w.reads.join(', ')}.`).join('\n')}
 
 `;

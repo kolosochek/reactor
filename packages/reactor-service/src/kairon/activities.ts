@@ -44,7 +44,7 @@ import { applyPatch, ForecastPatchSchema, type EvaluateBody, type ForecastDocume
 import { criteriaMatrix, rankDrafts, sameAsEarlier, switchesFor, type DraftScore } from './ranking.js';
 import { reconcile, type Reconciliation } from './reconcile.js';
 import { redLines, type RedLine } from './redLines.js';
-import { cutWidgetData, type SubjectInput, type WidgetCatalog } from './widgetCatalog.js';
+import { cutWidgetData, WIDGETS_DIST_ENV, type SubjectInput, type WidgetCatalog } from './widgetCatalog.js';
 import { catalogPaths, changedPaths, widgetInputs, type PathChange, type WidgetInputs } from './widgets.js';
 import { applyScenario, ScenarioSpecSchema, type ScenarioSpec } from './scenario.js';
 import {
@@ -818,14 +818,33 @@ const noWidgetCatalog = async (): Promise<WidgetCatalog | null> => null;
 
 /**
  * `widgets` loads the forecast widgets catalog (DEV-1380); the default loads none, and the scoring and
- * the widgets step then return what they returned before.
+ * the widgets step then return what they returned before. A loader that rejects gives the same result
+ * plus one `kairon.widgets.warning` event.
  */
 export function createKaironActivities(
   api: KaironApi,
   widgets: () => Promise<WidgetCatalog | null> = noWidgetCatalog,
 ): Record<KaironToolName, Activity> {
+  // One load per set of activities, that is per run: the service builds a reactor for every POST
+  // /kairon/run. The load starts in the first step of the run, before any LLM call, so a broken
+  // build costs no paid call: the run gets one warning in its trace and goes on with no catalog.
+  let loading: Promise<WidgetCatalog | null> | null = null;
+  const catalogOf = (ctx: ActivityContext): Promise<WidgetCatalog | null> => {
+    loading ??= Promise.resolve()
+      .then(widgets)
+      .catch((err: unknown) => {
+        const reason = err instanceof Error ? err.message : String(err);
+        const named = reason.includes(WIDGETS_DIST_ENV) ? reason : `${WIDGETS_DIST_ENV}: ${reason}`;
+        ctx.onProgress?.({ type: 'kairon.widgets.warning', payload: { message: `${named}. The run goes on with no catalog widgets.` } });
+        return null;
+      });
+    return loading;
+  };
   const traced = (name: KaironToolName, kind: 'explicit' | 'latent', activity: Activity): Activity =>
-    traceActivity(name, kind, kaironToolInputSchemas[name], activity);
+    traceActivity(name, kind, kaironToolInputSchemas[name], async (input, ctx) => {
+      await catalogOf(ctx);
+      return activity(input, ctx);
+    });
   return {
     'kairon.baseline': traced('kairon.baseline', 'explicit', async (_input, ctx) =>
       readBaseline(traceKaironApi(api, ctx.onProgress)),
@@ -842,9 +861,9 @@ export function createKaironActivities(
       buildGoalDrafts(traceKaironApi(api, ctx.onProgress), input, ctx),
     ),
     'kairon.scoreVariants': traced('kairon.scoreVariants', 'explicit', async (input, ctx) =>
-      scoreVariants(traceKaironApi(api, ctx.onProgress), input, await widgets()),
+      scoreVariants(traceKaironApi(api, ctx.onProgress), input, await catalogOf(ctx)),
     ),
-    'kairon.planWidgets': traced('kairon.planWidgets', 'latent', async (input, ctx) => planWidgets(input, ctx, await widgets())),
+    'kairon.planWidgets': traced('kairon.planWidgets', 'latent', async (input, ctx) => planWidgets(input, ctx, await catalogOf(ctx))),
     'kairon.explainVariants': traced('kairon.explainVariants', 'latent', async (input, ctx) => explainVariants(input, ctx)),
     'kairon.answerQuestion': traced('kairon.answerQuestion', 'latent', async (input, ctx) => answerQuestion(input, ctx)),
   };

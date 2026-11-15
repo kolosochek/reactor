@@ -152,4 +152,22 @@ describe('GET /kairon/widgets (DEV-1380)', () => {
     expect(await widgetsInfo()).toEqual([200, { bundle: null, buildId: null }]);
     dist.remove();
   });
+
+  it('names no bundle when the build does not load as a catalog', async () => {
+    // SCENARIO: a run on a broken build goes on with no catalog, so the page must not mount a bundle for it
+    //           (review I4, minor 7: a manifest cut short used to answer 500)
+    // INPUT: KAIRON_WIDGETS_DIST = (a) a manifest.json cut mid-object; (b) a manifest.json holding null;
+    //        (c) no core.mjs; (d) a manifest of another build than the core
+    // EXPECTED: 200 with bundle null and buildId null for all four
+    const faults = [{ manifestText: '{"buildId": "stub-bu' }, { manifestText: 'null' }, { omit: 'core.mjs' as const }, { manifestBuildId: 'other-build' }];
+    const answers: unknown[] = [];
+    for (const fault of faults) {
+      const dist = writeStubWidgetsDist(fault);
+      process.env.KAIRON_WIDGETS_DIST = dist.dir;
+      answers.push(await widgetsInfo());
+      dist.remove();
+    }
+    const none = [200, { bundle: null, buildId: null }];
+    expect(answers).toEqual([none, none, none, none]);
+  });
 });
