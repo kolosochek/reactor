@@ -2,6 +2,8 @@
 // section 5.7 (construction +8 %) and the Cedar cover goal, and the fake API
 // that serves them by body.
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { formatMillions, summarizeEvaluation } from '../kairon/summary.js';
 import { applyPatch } from '../kairon/patch.js';
@@ -47,3 +49,63 @@ describe('stage 5 fixtures', () => {
     expect('settings' in without).toBe(false);
   });
 });
+
+describe('the stage 5 demo session recording (DEV-1381)', () => {
+  const LIMIT_PER_DRAFT = 100 * 1024;
+  const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+  const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+  it('holds no widget data and each draft\'s instances once, within 100 KB per draft', () => {
+    // SCENARIO: with 14 widgets a run added up to 2.8 MB to a recording; the trace now writes the instances
+    //           once, in run.done, and widget data as byte counts
+    // INPUT: demo-session.ndjson, recorded with the sample model on the wave 1 widgets build
+    // EXPECTED: 12 runs; no widgetData key; no full instance outside the output of run.done; 114 instances for
+    //           9 drafts, all of one build; no draft over 100 KB
+    const file = fileURLToPath(new URL('./fixtures/kairon/stage5/demo-session.ndjson', import.meta.url));
+    const events = readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line) as { type: string; payload: unknown });
+    let widgetDataKeys = 0;
+    let fullOutsideRunDone = 0;
+    const drafts: Array<{ bytes: number; count: number }> = [];
+    const builds = new Set<unknown>();
+    const walk = (value: unknown, inRunDoneOutput: boolean): void => {
+      if (Array.isArray(value)) return value.forEach((item) => walk(item, inRunDoneOutput));
+      if (!isRecord(value)) return;
+      for (const [key, child] of Object.entries(value)) {
+        if (key === 'widgetData' && isRecord(child)) widgetDataKeys += 1;
+        if (key === 'instances' && isRecord(child) && 'widgets' in value) {
+          for (const list of Object.values(child)) {
+            const full = (list as Array<Record<string, unknown>>).filter((instance) => 'data' in instance);
+            if (!inRunDoneOutput) fullOutsideRunDone += full.length;
+            if (inRunDoneOutput && full.length > 0) drafts.push({ bytes: bytes(full), count: full.length });
+            if (inRunDoneOutput) full.forEach((instance) => builds.add(instance['buildId']));
+          }
+          continue;
+        }
+        walk(child, inRunDoneOutput);
+      }
+    };
+    for (const event of events) {
+      const solution = event.type === 'run.done' && isRecord(event.payload) && isRecord(event.payload['solution']) ? event.payload['solution'] : null;
+      if (solution === null) {
+        walk(event.payload, false);
+        continue;
+      }
+      const { output, ...rest } = solution;
+      walk(rest, false);
+      walk(output, true);
+    }
+    expect({
+      runs: events.filter((event) => event.type === 'run.done').length,
+      widgetDataKeys,
+      fullOutsideRunDone,
+      drafts: drafts.length,
+      instances: drafts.reduce((sum, draft) => sum + draft.count, 0),
+      builds: [...builds],
+      overLimit: drafts.filter((draft) => draft.bytes > LIMIT_PER_DRAFT).map((draft) => draft.bytes),
+    }).toEqual({ runs: 12, widgetDataKeys: 0, fullOutsideRunDone: 0, drafts: 9, instances: 114, builds: ['2026-11-15T11:44:54.327Z'], overLimit: [] });
+  });
+});
+
