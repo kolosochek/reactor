@@ -631,10 +631,9 @@ export function renderDiffView(view, currency = { ...CZK, currencyCode: 'CZK' })
 // KAIRON_WIDGETS_DIST; without it, and for a run recorded before DEV-1380, the page's own
 // renderers draw.
 
-/** The catalog instances of a draft from the widgets step of a run, by widget id; empty when the run has none. */
+/** The catalog instances of a draft from the widgets step of a run, in the server's order; empty when the run has none. */
 export function instancesOf(out, variantId) {
-  const list = ((out.widgets || {}).instances || {})[variantId] || [];
-  return new Map(list.map((instance) => [instance.widget, instance]));
+  return ((out.widgets || {}).instances || {})[variantId] || [];
 }
 
 /**
@@ -647,29 +646,53 @@ export function acceptBundle(module, info) {
   return info && typeof info.buildId === 'string' && module.buildId === info.buildId ? module : null;
 }
 
-/** Whether `bundle` draws `instance`: same build, the widget at the instance's version, data that parses. */
+/**
+ * Whether `bundle` draws `instance`: the same build, the widget in the bundle's manifest at the
+ * instance's version, data that parses. False without a bundle or an instance.
+ */
 function bundleDraws(bundle, instance) {
+  if (!bundle || typeof bundle.mount !== 'function' || !instance) return false;
   if (!bundle.catalog || typeof bundle.buildId !== 'string' || instance.buildId !== bundle.buildId) return false;
-  const known = bundle.catalog.manifest().find((entry) => entry.id === instance.widget);
-  if (!known || known.version !== instance.version) return false;
-  bundle.catalog.parseData(instance.widget, instance.data);
-  return true;
+  try {
+    const known = bundle.catalog.manifest().find((entry) => entry.id === instance.widget);
+    if (!known || known.version !== instance.version) return false;
+    bundle.catalog.parseData(instance.widget, instance.data);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Mounts a catalog instance into `host` and returns the function that removes it. Returns null
- * when the bundle is not loaded, the draft has no such instance, the instance was assembled by
- * another build (a session replayed after a rebuild carries the old build id, a session recorded
- * before the stamp carries none), its version or data does not fit the bundle, or the bundle
- * fails: the caller then draws with the page's own renderer, so the figure stays on the page.
+ * when the bundle is not loaded, there is no instance, the instance was assembled by another
+ * build (a session replayed after a rebuild carries the old build id, a session recorded before
+ * the stamp carries none), its version or data does not fit the bundle, or the bundle fails.
  */
 export function mountInstance(host, bundle, instance) {
-  if (!bundle || typeof bundle.mount !== 'function' || !instance) return null;
+  if (!bundleDraws(bundle, instance)) return null;
   try {
-    return bundleDraws(bundle, instance) ? bundle.mount(host, instance, { locale: 'ru' }) : null;
+    return bundle.mount(host, instance, { locale: 'ru' });
   } catch {
     return null;
   }
+}
+
+/**
+ * Mounts every instance the bundle draws, in the order the server assembled them (DEV-1381). The
+ * page names no widget id: which widgets a draft gets is the server's decision, and what the
+ * bundle can draw is read from the bundle's manifest. `hostOf(instance)` makes the element of one
+ * instance; it is called only for an instance the bundle draws. Returns the hosts with their unmounts.
+ */
+export function mountInstances(bundle, instances, hostOf) {
+  const mounted = [];
+  for (const instance of instances) {
+    if (!bundleDraws(bundle, instance)) continue;
+    const host = hostOf(instance);
+    const unmount = mountInstance(host, bundle, instance);
+    if (unmount) mounted.push({ host, unmount });
+  }
+  return mounted;
 }
 
 export const CARD_CSS = `

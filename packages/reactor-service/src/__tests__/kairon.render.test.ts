@@ -27,7 +27,8 @@ interface RenderModule {
   renderRouteNote(route: unknown): string;
   answersOf(out: unknown): Array<{ parentId: string; text: string }>;
   sessionExport(session: unknown, meta: unknown): unknown;
-  instancesOf(out: unknown, variantId: string): Map<string, unknown>;
+  instancesOf(out: unknown, variantId: string): unknown[];
+  mountInstances(bundle: unknown, instances: unknown[], hostOf: (instance: unknown) => unknown): Array<{ host: unknown; unmount: () => void }>;
   mountInstance(host: unknown, bundle: unknown, instance: unknown): (() => void) | null;
   acceptBundle(module: unknown, info: unknown): unknown;
 }
@@ -495,11 +496,12 @@ describe('kairon render: session export', () => {
 describe('catalog widgets on the page (DEV-1380)', () => {
   const cash = { widget: 'cash-line', version: 1, buildId: 'b1', spec: { widget: 'cash-line', title: 'Деньги' }, data: { rows: 44 }, provenance: 'kairon' };
   const kpi = { widget: 'kpi-tiles', version: 1, buildId: 'b1', spec: { widget: 'kpi-tiles', title: 'Показатели' }, data: { tiles: 5 }, provenance: 'kairon' };
+  const need = { widget: 'need-rows', version: 1, buildId: 'b1', spec: { widget: 'need-rows', title: 'Потребность' }, data: { rows: 3 }, provenance: 'kairon' };
   const host = { id: 'host' };
 
   /**
    * A stand-in for the bundle of build b1: records what mount() was called with and counts unmounts.
-   * Its catalog carries both widgets at version 1 and refuses data that holds `broken`.
+   * Its catalog carries three widgets at version 1 and refuses data that holds `broken`.
    */
   function fakeBundle() {
     const calls: unknown[][] = [];
@@ -512,6 +514,7 @@ describe('catalog widgets on the page (DEV-1380)', () => {
         manifest: () => [
           { id: 'kpi-tiles', version: 1 },
           { id: 'cash-line', version: 1 },
+          { id: 'need-rows', version: 1 },
         ],
         parseData: (id: string, data: { broken?: boolean }) => {
           if (data.broken === true) throw new Error(`widget "${id}" got data that breaks its schema`);
@@ -527,25 +530,55 @@ describe('catalog widgets on the page (DEV-1380)', () => {
     };
   }
 
-  it('reads the instances of a draft from the widgets step, by widget id', () => {
-    // SCENARIO: a run made with the widgets catalog carries instances per draft
-    // INPUT: out.widgets.instances = { v1: [kpi-tiles, cash-line] }; asked for v1 and for v2
-    // EXPECTED: v1 gives both instances by id, in order; v2 gives none
-    const out = { widgets: { widgets: {}, instances: { v1: [kpi, cash] } } };
-    expect([[...render.instancesOf(out, 'v1').entries()], [...render.instancesOf(out, 'v2').entries()]]).toEqual([
-      [
-        ['kpi-tiles', kpi],
-        ['cash-line', cash],
-      ],
-      [],
-    ]);
+  it('reads the instances of a draft from the widgets step, in the server\'s order', () => {
+    // SCENARIO: a run made with the widgets catalog carries instances per draft; the page names no widget id (DEV-1381)
+    // INPUT: out.widgets.instances = { v1: [kpi-tiles, need-rows, cash-line] }; asked for v1 and for v2
+    // EXPECTED: v1 gives the three instances in that order; v2 gives none
+    const out = { widgets: { widgets: {}, instances: { v1: [kpi, need, cash] } } };
+    expect([render.instancesOf(out, 'v1'), render.instancesOf(out, 'v2')]).toEqual([[kpi, need, cash], []]);
   });
 
   it('reads no instances from a run recorded before DEV-1380', () => {
     // SCENARIO: a saved session of the old code replays on the new page
     // INPUT: a run whose widgets step returned specs alone; a run with no widgets step
     // EXPECTED: no instances for either, so the page draws with its own renderers
-    expect([render.instancesOf({ widgets: { widgets: { v1: [] } } }, 'v1').size, render.instancesOf({}, 'v1').size]).toEqual([0, 0]);
+    expect([render.instancesOf({ widgets: { widgets: { v1: [] } } }, 'v1'), render.instancesOf({}, 'v1')]).toEqual([[], []]);
+  });
+
+  it('mounts every instance the bundle draws, each in its own host, in the server\'s order', () => {
+    // SCENARIO: the server assembled three instances; the bundle's manifest carries all three widgets (DEV-1381)
+    // INPUT: instances kpi-tiles, need-rows, cash-line; a host made per instance
+    // EXPECTED: three mounts in that order, each with its own host; the hosts come back with their unmounts
+    const bundle = fakeBundle();
+    const mounted = render.mountInstances(bundle, [kpi, need, cash], (instance) => ({ hostOf: (instance as { widget: string }).widget }));
+    mounted.forEach((m) => m.unmount());
+    expect([bundle.calls.map((call) => [call[0], call[1]]), mounted.map((m) => m.host), bundle.unmounted()]).toEqual([
+      [
+        [{ hostOf: 'kpi-tiles' }, kpi],
+        [{ hostOf: 'need-rows' }, need],
+        [{ hostOf: 'cash-line' }, cash],
+      ],
+      [{ hostOf: 'kpi-tiles' }, { hostOf: 'need-rows' }, { hostOf: 'cash-line' }],
+      3,
+    ]);
+  });
+
+  it('skips an instance the bundle does not draw and mounts the rest', () => {
+    // SCENARIO: one instance is of a version the bundle lacks, one of a widget its manifest does not carry
+    // INPUT: kpi-tiles, cash-line at version 2, an instance of widget nope; the bundle b1
+    // EXPECTED: kpi-tiles alone is mounted; no host is made for the other two; with no bundle nothing is mounted
+    const bundle = fakeBundle();
+    const hosts: string[] = [];
+    const hostOf = (instance: unknown) => {
+      hosts.push((instance as { widget: string }).widget);
+      return { hostOf: (instance as { widget: string }).widget };
+    };
+    const list = [kpi, { ...cash, version: 2 }, { ...cash, widget: 'nope' }];
+    expect([render.mountInstances(bundle, list, hostOf).map((m) => m.host), hosts, render.mountInstances(null, list, hostOf)]).toEqual([
+      [{ hostOf: 'kpi-tiles' }],
+      ['kpi-tiles'],
+      [],
+    ]);
   });
 
   it('mounts an instance with the bundle, in Russian, and hands back the unmount', () => {
@@ -595,7 +628,7 @@ describe('catalog widgets on the page (DEV-1380)', () => {
     const bundle = fakeBundle();
     expect([
       render.mountInstance(host, bundle, { ...cash, version: 2 }),
-      render.mountInstance(host, bundle, { ...cash, widget: 'need-rows' }),
+      render.mountInstance(host, bundle, { ...cash, widget: 'nope' }),
       bundle.calls,
     ]).toEqual([null, null, []]);
   });

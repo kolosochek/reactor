@@ -545,7 +545,7 @@ svg text { font-size: 11px; }
   }
 
   /** `skipNetProfit`: the bundle's kpi-tiles already shows the net profit above this row (DEV-1380). */
-  function kpiTiles(v, d, ctx, skipNetProfit) {
+  function kpiTiles(v, d, ctx) {
     const an = mln(d.profit.activeNetMinor), vn = mln(d.profit.variantNetMinor);
     const ae = mln(d.profit.activeExitMinor), ve = mln(d.profit.variantExitMinor);
     const at = d.cash.activeTrough, vt = d.cash.variantTrough;
@@ -553,7 +553,7 @@ svg text { font-size: 11px; }
     const ai = mln(d.interest.activeMinor), vi = mln(d.interest.variantMinor);
     const altv = ctx.active.ltvBp, vltv = v.metrics.ltvBp;
     return el('div', { class: 'tiles' }, [
-      skipNetProfit ? null : tile('Чистая прибыль', fmtMln(vn), fmtMln(an), vn - an, true, fmtDeltaMln),
+      tile('Чистая прибыль', fmtMln(vn), fmtMln(an), vn - an, true, fmtDeltaMln),
       ae !== null && ve !== null ? tile('Прибыль на выходе, партнёрам', fmtMln(ve), fmtMln(ae), ve - ae, true, fmtDeltaMln) : null,
       vt && at ? tile('Дно денег проекта', fmtMln(mln(vt.minor)) + ' · ' + monthLabel(vt.month), fmtMln(mln(at.minor)) + ' · ' + monthLabel(at.month), mln(vt.minor) - mln(at.minor), true, fmtDeltaMln) : null,
       vp && ap ? tile('Деньги снова в плюсе', monthLabel(vp), monthLabel(ap), monthIndex(vp) - monthIndex(ap), false, fmtMonths) : null,
@@ -794,18 +794,6 @@ svg text { font-size: 11px; }
     return el('div', {}, [head, el('div', { class: 'chartwrap', style: 'max-width: 760px' }, [svg]), exit]);
   }
 
-  /**
-   * A catalog widget of the draft, mounted by the bundle (DEV-1380), or null when the bundle is not
-   * loaded or the run has no such instance; the caller then draws with the page's own renderer.
-   */
-  function catalogNode(widget, ctx) {
-    const host = el('div', { class: 'k-catalog' });
-    const unmount = R.mountInstance(host, WIDGETS, (ctx.instances || new Map()).get(widget));
-    if (!unmount) return null;
-    if (ctx.unmounts) ctx.unmounts.push(unmount);
-    return host;
-  }
-
   function variantPanel(v, ctx) {
     const t = (ctx.explanation.variants || []).find((x) => x.id === v.id) || null;
     const d = v.diff;
@@ -821,11 +809,9 @@ svg text { font-size: 11px; }
       panel.appendChild(el('div', { class: 'muted', text: 'Диффа против активного прогноза нет: прогон сделан до этапа 4.' }));
       return panel;
     }
-    const kpiNode = catalogNode('kpi-tiles', ctx);
-    if (kpiNode) panel.appendChild(kpiNode);
-    panel.appendChild(kpiTiles(v, d, ctx, kpiNode !== null));
+    panel.appendChild(kpiTiles(v, d, ctx));
     panel.appendChild(section('Сроки: что сдвигается', 'Серая полоса: активный прогноз, цветная: ' + v.id + '. Сдвиги прочитаны из ячеек плана; вехи версии evaluate не пересчитывает.', timeline(v, d, ctx.milestones)));
-    panel.appendChild(catalogNode('cash-line', ctx) || section('Деньги проекта', 'Накопленный чистый поток с начала проекта, млн ' + money.code + '. Дно: момент наибольшей потребности в деньгах.', cashChart(v, d)));
+    panel.appendChild(section('Деньги проекта', 'Накопленный чистый поток с начала проекта, млн ' + money.code + '. Дно: момент наибольшей потребности в деньгах.', cashChart(v, d)));
     panel.appendChild(section('План финансирования', 'Остаток основного долга по источникам на конец месяца, млн ' + money.code + '.', fundingCharts(v, d)));
     panel.appendChild(section('Откуда разница в прибыли', 'Изменение по группам строк плана против активного прогноза, млн ' + money.code + '.', bridgeChart(v, d)));
     if (d.notes.length) panel.appendChild(el('div', { class: 'notes' }, [el('div', { class: 'eyebrow', text: 'Что расчёт не видит (по данным Kairon)' }), el('ul', {}, d.notes.map((n) => el('li', { text: n })))]));
@@ -1464,7 +1450,13 @@ svg text { font-size: 11px; }
     const specs = ((out.widgets || {}).widgets || {})[v.id] || [];
     if (v.widgetInputs) specs.forEach((spec) => card.appendChild(htmlBlock('', R.renderWidget(spec, v, v.widgetInputs.parent, v.widgetInputs.draft, cur))));
     if (v.widgetErrors && v.widgetErrors.length) card.appendChild(el('div', { class: 'warnbox', text: 'Виджеты каталога без данных: ' + v.widgetErrors.join('; ') }));
-    card.appendChild(variantPanel(v, Object.assign({}, ctx, { instances: R.instancesOf(out, v.id) })));
+    // The catalog widgets the server assembled for the draft (DEV-1381), in the server's order, after the
+    // declarative ones. The page names no widget id; an instance the bundle does not draw is skipped.
+    R.mountInstances(WIDGETS, R.instancesOf(out, v.id), () => el('div', { class: 'k-catalog' })).forEach((m) => {
+      card.appendChild(m.host);
+      if (ctx.unmounts) ctx.unmounts.push(m.unmount);
+    });
+    card.appendChild(variantPanel(v, ctx));
     card.appendChild(saveRow(section, v));
     return card;
   }
