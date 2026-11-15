@@ -26,7 +26,8 @@ import {
 } from './prompts.js';
 import { SWITCH_GOALS } from './ranking.js';
 import { literalNumbers, renderPlaceholders } from './summary.js';
-import { defaultWidgets, WidgetSpecSchema, withMandatory, type ChangedPath, type WidgetSpec } from './widgets.js';
+import type { WidgetCatalog, WidgetInstance } from './widgetCatalog.js';
+import { catalogInstances, defaultWidgets, OWN_WIDGETS, WidgetSpecSchema, withMandatory, type ChangedPath, type WidgetSpec } from './widgets.js';
 
 type LLMMessage = LLMCompletionRequest['messages'][number];
 
@@ -39,7 +40,15 @@ const PathChangeArg = z.object({ path: z.string(), cells: z.number() });
 
 export const PlanWidgetsInput = z.object({
   scored: z.object({
-    variants: z.array(z.object({ id: z.string(), status: z.string(), changed: z.array(PathChangeArg).default([]) })),
+    variants: z.array(
+      z.object({
+        id: z.string(),
+        status: z.string(),
+        changed: z.array(PathChangeArg).default([]),
+        /** Catalog widget id to its data, as the scoring cut it (DEV-1380); absent without a widgets catalog. */
+        widgetData: z.record(z.unknown()).nullable().optional(),
+      }),
+    ),
   }),
 });
 
@@ -47,30 +56,81 @@ const WidgetsReply = z.object({
   widgets: z.array(z.object({ id: z.string(), specs: z.array(WidgetSpecSchema).default([]) })).default([]),
 });
 
-export async function planWidgets(raw: unknown, ctx: ActivityContext): Promise<{ widgets: Record<string, WidgetSpec[]> }> {
+/** A reply before its specs are told apart: this service's declarative specs and catalog specs share one list. */
+const MixedWidgetsReply = z.object({
+  widgets: z.array(z.object({ id: z.string(), specs: z.array(z.unknown()).default([]) })).default([]),
+});
+
+interface ChosenWidgets {
+  id: string;
+  specs: WidgetSpec[];
+  /** Specs naming a widget this service does not draw itself: catalog widgets, or unknown ids that are dropped later. */
+  catalogSpecs: unknown[];
+}
+
+function widgetNameOf(spec: unknown): string {
+  const name = typeof spec === 'object' && spec !== null ? (spec as { widget?: unknown }).widget : undefined;
+  return typeof name === 'string' ? name : '';
+}
+
+/** With a catalog loaded, the reply's own specs are validated as before and every other spec is set aside. */
+function splitReply(normalized: unknown): { value: ChosenWidgets[] | null; errors: string[] } {
+  const mixed = MixedWidgetsReply.safeParse(normalized);
+  if (!mixed.success) return { value: null, errors: zodErrors(mixed.error) };
+  const own = WidgetsReply.safeParse({
+    widgets: mixed.data.widgets.map((w) => ({ id: w.id, specs: w.specs.filter((spec) => OWN_WIDGETS.includes(widgetNameOf(spec))) })),
+  });
+  if (!own.success) return { value: null, errors: zodErrors(own.error) };
+  return {
+    value: mixed.data.widgets.map((w, i) => ({
+      id: w.id,
+      specs: own.data.widgets[i]?.specs ?? [],
+      catalogSpecs: w.specs.filter((spec) => !OWN_WIDGETS.includes(widgetNameOf(spec))),
+    })),
+    errors: [],
+  };
+}
+
+/**
+ * `catalog` is the forecast widgets catalog (DEV-1380). Without one the step returns the declarative
+ * specs alone, as before. With one it also returns `instances`: per draft, the catalog widgets the
+ * page mounts, each a spec (the LLM's or the server's default) with the data the scoring cut.
+ */
+export async function planWidgets(
+  raw: unknown,
+  ctx: ActivityContext,
+  catalog: WidgetCatalog | null = null,
+): Promise<{ widgets: Record<string, WidgetSpec[]>; instances?: Record<string, WidgetInstance[]> }> {
   const input = PlanWidgetsInput.parse(raw);
   const ok = input.scored.variants
     .filter((v) => v.status === 'ok')
-    .map((v) => ({ id: v.id, changed: v.changed.map((c) => ({ path: c.path as ChangedPath, cells: c.cells })) }));
-  if (ok.length === 0) return { widgets: {} };
+    .map((v) => ({ id: v.id, changed: v.changed.map((c) => ({ path: c.path as ChangedPath, cells: c.cells })), widgetData: v.widgetData ?? null }));
+  if (ok.length === 0) return catalog === null ? { widgets: {} } : { widgets: {}, instances: {} };
   const ids = ok.map((v) => v.id);
-  const schema = widgetsJsonSchema(ids);
-  const answer = await askStructured<z.infer<typeof WidgetsReply>>(ctx, {
-    system: widgetsSystemPrompt(),
+  const catalogIds = catalog === null ? [] : catalog.manifest.map((entry) => entry.id);
+  const schema = widgetsJsonSchema(ids, catalog !== null && catalogIds.length > 0 ? catalog.specJsonSchema(catalogIds) : undefined);
+  const answer = await askStructured<ChosenWidgets[]>(ctx, {
+    system: widgetsSystemPrompt(catalog === null ? [] : catalog.manifest),
     user: widgetsUserPrompt(ok),
     schemaName: 'draft_widgets',
     schema,
     relaxedSchema: schema,
     label: 'planWidgets',
     check: (normalized) => {
+      if (catalog !== null) return splitReply(normalized);
       const parsed = WidgetsReply.safeParse(normalized);
-      return parsed.success ? { value: parsed.data, errors: [] } : { value: null, errors: zodErrors(parsed.error) };
+      return parsed.success
+        ? { value: parsed.data.widgets.map((w) => ({ ...w, catalogSpecs: [] })), errors: [] }
+        : { value: null, errors: zodErrors(parsed.error) };
     },
   });
-  const chosen = new Map((answer.value?.widgets ?? []).map((w) => [w.id, w.specs]));
+  const chosen = new Map((answer.value ?? []).map((w) => [w.id, w]));
   const widgets: Record<string, WidgetSpec[]> = {};
-  for (const v of ok) widgets[v.id] = withMandatory(chosen.get(v.id) ?? defaultWidgets(v.changed), v.changed);
-  return { widgets };
+  for (const v of ok) widgets[v.id] = withMandatory(chosen.get(v.id)?.specs ?? defaultWidgets(v.changed), v.changed);
+  if (catalog === null) return { widgets };
+  const instances: Record<string, WidgetInstance[]> = {};
+  for (const v of ok) instances[v.id] = catalogInstances(catalog, v, chosen.get(v.id)?.catalogSpecs ?? []);
+  return { widgets, instances };
 }
 
 // ---------- explainVariants ----------

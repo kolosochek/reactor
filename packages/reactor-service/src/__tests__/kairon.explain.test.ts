@@ -3,10 +3,12 @@
 // questions. The LLM writes words and {{key}} placeholders; the server fills
 // every figure and lists the numbers the LLM typed itself.
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { ActivityContext, LLMCompletionRequest, LLMCompletionResponse, LLMProvider } from '@kolosochek/reactor-core';
 import { createKaironActivities } from '../kairon/activities.js';
+import { loadWidgetCatalog } from '../kairon/widgetCatalog.js';
 import { baselineEvaluate, fakeKaironApi } from './_helpers/kaironFake.js';
+import { writeStubWidgetsDist } from './_helpers/widgetsStub.js';
 
 function scriptedLlm(replies: string[]) {
   const queue = [...replies];
@@ -63,6 +65,122 @@ describe('kairon.planWidgets', () => {
       widgets: Record<string, Array<{ widget: string }>>;
     };
     expect(out.widgets['v2.1']?.map((s) => s.widget)).toEqual(['matrix-diff', 'bars-before-after']);
+  });
+});
+
+describe('kairon.planWidgets without a widgets catalog', () => {
+  it('returns the declarative specs alone, as before DEV-1380', async () => {
+    // SCENARIO: the service runs with no KAIRON_WIDGETS_DIST; a recorded session must replay unchanged
+    // INPUT: a draft that changed the draws; the sample model's empty reply
+    // EXPECTED: the output has the one key widgets; the prompt names no catalog widget
+    const llm = scriptedLlm([JSON.stringify({ widgets: [] })]);
+    const scored = { variants: [{ id: 'v1', status: 'ok', changed: [{ path: 'funding.draws', cells: 36 }] }] };
+    const out = (await activities['kairon.planWidgets']({ scored }, ctxWith(llm))) as Record<string, unknown>;
+    expect([Object.keys(out), llm.complete.mock.calls[0]?.[0].messages[0]?.content.includes('CATALOG WIDGETS')]).toEqual([['widgets'], false]);
+  });
+});
+
+describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
+  const dist = writeStubWidgetsDist();
+  afterAll(() => dist.remove());
+  const withCatalog = createKaironActivities(fakeKaironApi(baselineEvaluate), () => loadWidgetCatalog({ KAIRON_WIDGETS_DIST: dist.dir }));
+  const NO_FOCUS = { sourceIds: [], partnerIds: [], lineCodes: [] };
+  const cashData = { rows: 44 };
+  const profitData = { netProfitMinor: '33342746353' };
+  const s2 = (changed: Array<{ path: string; cells: number }>, widgetData: Record<string, unknown> | null) => ({
+    variants: [{ id: 'v1', status: 'ok', changed, widgetData }],
+  });
+  const ALL_CHANGED = [
+    { path: 'funding.draws', cells: 36 },
+    { path: 'walk.cumulativeNetCashMinor', cells: 23 },
+    { path: 'netProfit', cells: 1 },
+  ];
+  type Out = {
+    widgets: Record<string, Array<{ widget: string }>>;
+    instances: Record<string, Array<{ widget: string; version: number; spec: unknown; data: unknown; provenance: string }>>;
+  };
+
+  it('assembles an instance for every catalog widget whose paths changed, when the LLM names none', async () => {
+    // SCENARIO: the sample model answers { widgets: [] }; the server decides which catalog widgets a draft gets
+    // INPUT: v1 changed the draws, the cash line and the net profit; data for stub-cash and stub-profit
+    // EXPECTED: instances stub-cash (v2) and stub-profit (v1) in manifest order, titled by the manifest, empty focus,
+    //           provenance kairon; the draws rule still gives matrix-diff and bars
+    const out = (await withCatalog['kairon.planWidgets'](
+      { scored: s2(ALL_CHANGED, { 'stub-cash': cashData, 'stub-profit': profitData }) },
+      ctxWith(scriptedLlm([JSON.stringify({ widgets: [] })])),
+    )) as Out;
+    expect([out.widgets['v1']?.map((w) => w.widget), out.instances['v1']]).toEqual([
+      ['matrix-diff', 'bars-before-after'],
+      [
+        { widget: 'stub-cash', version: 2, spec: { widget: 'stub-cash', title: 'Cumulative cash', focus: NO_FOCUS }, data: cashData, provenance: 'kairon' },
+        { widget: 'stub-profit', version: 1, spec: { widget: 'stub-profit', title: 'Net profit', focus: NO_FOCUS }, data: profitData, provenance: 'kairon' },
+      ],
+    ]);
+  });
+
+  it('takes the title and the focus the LLM gave, drops an unknown id and keeps the draws rule', async () => {
+    // SCENARIO: the LLM names a catalog widget with its own title and focus, one id nobody knows, and no matrix-diff
+    // INPUT: specs: stub-cash «Деньги проекта» focused on source s1; nope; bars-before-after
+    // EXPECTED: the stub-cash instance carries the LLM's title and focus (the two empty focus lists are filled back in);
+    //           stub-profit keeps its default spec; nope is dropped; widgets are matrix-diff then bars
+    const reply = {
+      widgets: [
+        {
+          id: 'v1',
+          specs: [
+            { widget: 'stub-cash', title: 'Деньги проекта', focus: { sourceIds: ['s1'], partnerIds: [], lineCodes: [] } },
+            { widget: 'nope', title: 'Неизвестный' },
+            { widget: 'bars-before-after', title: 'Было и стало', x: 'period', stack: 'sourceId', y: 'amountMinor', compare: ['parent', 'draft'], label: 'Δ' },
+          ],
+        },
+      ],
+    };
+    const llm = scriptedLlm([JSON.stringify(reply)]);
+    const out = (await withCatalog['kairon.planWidgets'](
+      { scored: s2(ALL_CHANGED, { 'stub-cash': cashData, 'stub-profit': profitData }) },
+      ctxWith(llm),
+    )) as Out;
+    expect([out.widgets['v1']?.map((w) => w.widget), out.instances['v1']?.map((i) => i.spec), llm.complete.mock.calls.length]).toEqual([
+      ['matrix-diff', 'bars-before-after'],
+      [
+        { widget: 'stub-cash', title: 'Деньги проекта', focus: { sourceIds: ['s1'], partnerIds: [], lineCodes: [] } },
+        { widget: 'stub-profit', title: 'Net profit', focus: NO_FOCUS },
+      ],
+      1,
+    ]);
+  });
+
+  it('gives no instance to a widget whose paths did not change or whose data is missing', async () => {
+    // SCENARIO: the cover draft moves draws only; and a widget whose select failed has no data
+    // INPUT: (a) changed funding.draws only, data for both widgets; (b) all paths changed, data for stub-profit only
+    // EXPECTED: (a) no instances; (b) stub-profit alone
+    const run = async (changed: Array<{ path: string; cells: number }>, data: Record<string, unknown>) =>
+      ((await withCatalog['kairon.planWidgets']({ scored: s2(changed, data) }, ctxWith(scriptedLlm([JSON.stringify({ widgets: [] })])))) as Out).instances['v1']?.map((i) => i.widget);
+    expect([
+      await run([{ path: 'funding.draws', cells: 14 }], { 'stub-cash': cashData, 'stub-profit': profitData }),
+      await run(ALL_CHANGED, { 'stub-profit': profitData }),
+    ]).toEqual([[], ['stub-profit']]);
+  });
+
+  it('offers the catalog widgets to the LLM in the prompt and in the schema', async () => {
+    // SCENARIO: the prompt and the response schema are built from the manifest
+    // INPUT: one ok draft, the stub catalog
+    // EXPECTED: the system prompt lists both stub widgets with what they read; the spec alternatives end with
+    //           a catalog spec whose widget enum is the two ids
+    const llm = scriptedLlm([JSON.stringify({ widgets: [] })]);
+    await withCatalog['kairon.planWidgets']({ scored: s2(ALL_CHANGED, {}) }, ctxWith(llm));
+    const request = llm.complete.mock.calls[0]?.[0] as unknown as {
+      messages: Array<{ content: string }>;
+      responseSchema: { schema: { properties: { widgets: { items: { properties: { specs: { items: { anyOf: Array<{ properties: { widget: { enum: string[] } } }> } } } } } } } };
+    };
+    const system = request.messages[0]?.content ?? '';
+    const alternatives = request.responseSchema.schema.properties.widgets.items.properties.specs.items.anyOf;
+    expect([
+      system.includes('- stub-cash: The cash line moved Reads: walk.cumulativeNetCashMinor.'),
+      system.includes('- stub-profit: The profit moved Reads: netProfit, exit.month.'),
+      alternatives.length,
+      alternatives.at(-1)?.properties.widget.enum,
+    ]).toEqual([true, true, 5, ['stub-cash', 'stub-profit']]);
   });
 });
 

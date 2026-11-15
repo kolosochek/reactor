@@ -44,7 +44,8 @@ import { applyPatch, ForecastPatchSchema, type EvaluateBody, type ForecastDocume
 import { criteriaMatrix, rankDrafts, sameAsEarlier, switchesFor, type DraftScore } from './ranking.js';
 import { reconcile, type Reconciliation } from './reconcile.js';
 import { redLines, type RedLine } from './redLines.js';
-import { changedPaths, widgetInputs, type PathChange, type WidgetInputs } from './widgets.js';
+import { cutWidgetData, type SubjectInput, type WidgetCatalog } from './widgetCatalog.js';
+import { catalogPaths, changedPaths, widgetInputs, type PathChange, type WidgetInputs } from './widgets.js';
 import { applyScenario, ScenarioSpecSchema, type ScenarioSpec } from './scenario.js';
 import {
   proposeSystemPrompt,
@@ -478,6 +479,13 @@ export interface ScoredVariant {
   diffView: DiffView | null;
   /** What w1 and w2 read from the parent's and the draft's evaluation; null unless Kairon scored it. */
   widgetInputs: { parent: WidgetInputs; draft: WidgetInputs } | null;
+  /**
+   * Catalog widget id to that widget's data, the parent as the baseline (DEV-1380); null unless Kairon scored
+   * the draft. This field and widgetErrors exist only when a widgets catalog is loaded.
+   */
+  widgetData?: Record<string, unknown> | null;
+  /** Catalog widgets that could not cut their data for this draft, as `id: reason`. */
+  widgetErrors?: string[];
   /** The senior bank as the draft's evaluate states it; null unless Kairon scored it or the project has no bank. */
   bank: BankState | null;
   /** Server-side scoring inputs the ranking reads. */
@@ -562,10 +570,21 @@ function goalRule(goal: RankGoal, b: Baseline): string {
   return 'Цель запроса не названа, поэтому цель по умолчанию: IRR каждого партнёра не ниже обещания и как можно ближе к нему.';
 }
 
-async function scoreVariants(api: KaironApi, raw: unknown) {
+async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalog | null) {
   const input = ScoreInput.parse(raw);
   const b = input.baseline;
   const currency = currencyOf(b);
+  const extraPaths = catalog === null ? [] : catalogPaths(catalog.manifest);
+  const widgetContext = { currency: { code: b.project.currencyCode, decimals: b.project.decimals }, closedThrough: b.closedThrough };
+  /** A parent as a widget subject: the active forecast under its version name, a parent draft under its id. */
+  const parentSubject = (side: ParentSide): SubjectInput => ({
+    id: side.key,
+    label: side.key === 'active' ? b.forecastVersion.name : side.key,
+    role: side.key === 'active' ? 'active' : 'draft',
+    document: side.body,
+    evaluation: side.eval,
+    context: widgetContext,
+  });
   const rules = rulesOf(b);
   const doc = await loadDocument(api, b);
   const activePlanHash = planHash(doc);
@@ -608,6 +627,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
       changed: [],
       diffView: null,
       widgetInputs: null,
+      ...(catalog === null ? {} : { widgetData: null, widgetErrors: [] }),
       bank: null,
       touchesReserve: false,
       reserveLeftMinor: '0',
@@ -637,6 +657,14 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
     });
     const asked = askedOf(lineage, v.parentId !== null);
     const reserve = reserveOf(body, doc, b.closedThrough);
+    const cut =
+      catalog === null
+        ? null
+        : cutWidgetData(
+            catalog,
+            { id: v.id, label: v.id, role: 'draft', document: body, evaluation: res.json, context: widgetContext },
+            parentSubject(parent),
+          );
     return {
       ...base,
       status: 'ok',
@@ -662,7 +690,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
         parentNetProfitMinor: parent.metrics.netProfitMinor,
         currency,
       }),
-      changed: changedPaths({ parentBody: parent.body, draftBody: body, parentEval: parent.eval, draftEval: res.json, diff }),
+      changed: changedPaths({ parentBody: parent.body, draftBody: body, parentEval: parent.eval, draftEval: res.json, diff }, extraPaths),
       diffView: forecastDiffView({
         parentPlan: parent.body.plan,
         draftPlan: body.plan,
@@ -673,6 +701,7 @@ async function scoreVariants(api: KaironApi, raw: unknown) {
         revenueGroups: REVENUE_GROUP_CODES,
       }),
       widgetInputs: { parent: widgetInputs(parent.eval), draft: widgetInputs(res.json) },
+      ...(cut === null ? {} : { widgetData: cut.data, widgetErrors: cut.errors }),
       bank: bankOf(res.json, b.closedThrough),
       touchesReserve: reserve.touches,
       reserveLeftMinor: reserve.leftMinor,
@@ -785,7 +814,16 @@ export const kaironToolInputSchemas: Record<KaironToolName, Record<string, unkno
   'kairon.answerQuestion': zodToJsonSchema(AnswerInput) as Record<string, unknown>,
 };
 
-export function createKaironActivities(api: KaironApi): Record<KaironToolName, Activity> {
+const noWidgetCatalog = async (): Promise<WidgetCatalog | null> => null;
+
+/**
+ * `widgets` loads the forecast widgets catalog (DEV-1380); the default loads none, and the scoring and
+ * the widgets step then return what they returned before.
+ */
+export function createKaironActivities(
+  api: KaironApi,
+  widgets: () => Promise<WidgetCatalog | null> = noWidgetCatalog,
+): Record<KaironToolName, Activity> {
   const traced = (name: KaironToolName, kind: 'explicit' | 'latent', activity: Activity): Activity =>
     traceActivity(name, kind, kaironToolInputSchemas[name], activity);
   return {
@@ -804,9 +842,9 @@ export function createKaironActivities(api: KaironApi): Record<KaironToolName, A
       buildGoalDrafts(traceKaironApi(api, ctx.onProgress), input, ctx),
     ),
     'kairon.scoreVariants': traced('kairon.scoreVariants', 'explicit', async (input, ctx) =>
-      scoreVariants(traceKaironApi(api, ctx.onProgress), input),
+      scoreVariants(traceKaironApi(api, ctx.onProgress), input, await widgets()),
     ),
-    'kairon.planWidgets': traced('kairon.planWidgets', 'latent', async (input, ctx) => planWidgets(input, ctx)),
+    'kairon.planWidgets': traced('kairon.planWidgets', 'latent', async (input, ctx) => planWidgets(input, ctx, await widgets())),
     'kairon.explainVariants': traced('kairon.explainVariants', 'latent', async (input, ctx) => explainVariants(input, ctx)),
     'kairon.answerQuestion': traced('kairon.answerQuestion', 'latent', async (input, ctx) => answerQuestion(input, ctx)),
   };

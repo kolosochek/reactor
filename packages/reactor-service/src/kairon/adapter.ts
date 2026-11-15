@@ -5,6 +5,7 @@
 
 import type { Adapter, Tool } from '@kolosochek/reactor-core';
 import { createKaironActivities, kaironToolInputSchemas } from './activities.js';
+import { lazyWidgetCatalog, type WidgetCatalog } from './widgetCatalog.js';
 import { sharedKaironClient, type KaironApi } from './client.js';
 
 export const kaironForecastTools: Tool[] = [
@@ -105,11 +106,15 @@ function lazyKaironClient(): KaironApi {
   };
 }
 
-export function createKaironForecastAdapter(api: KaironApi = lazyKaironClient()): Adapter {
+/** `widgets` loads the forecast widgets catalog from KAIRON_WIDGETS_DIST on first use; unset, it loads none (DEV-1380). */
+export function createKaironForecastAdapter(
+  api: KaironApi = lazyKaironClient(),
+  widgets: () => Promise<WidgetCatalog | null> = lazyWidgetCatalog(),
+): Adapter {
   return {
     name: 'kairon-forecast',
     version: '0.0.1',
     tools: kaironForecastTools,
-    activities: createKaironActivities(api),
+    activities: createKaironActivities(api, widgets),
   };
 }

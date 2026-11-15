@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { diffVariant } from '../kairon/diff.js';
 import { applyPatch, type EvaluateBody } from '../kairon/patch.js';
 import {
+  catalogPaths,
   changedPaths,
+  defaultCatalogSpec,
   defaultWidgets,
   EXISTING_WIDGETS,
   widgetInputs,
@@ -20,9 +22,13 @@ const CZK = { decimals: 2, currencyCode: 'CZK' };
 const parentBody = applyPatch(fixtureDoc, { name: 'active' });
 const parentEval = readStage5('eval-active.json');
 
-function changedFor(file: string) {
+type RawEval = { netProfit: string | null; exit: { month: string }; walk: { uncoveredNeedMinor: Record<string, string> } };
+
+/** The changed paths of a stage 5 draft; `extra` asks for catalog paths and `edit` alters a copy of the draft's evaluation. */
+function changedFor(file: string, extra: string[] = [], edit: (evaluation: RawEval) => void = () => {}) {
   const draftBody = readStage5(`${file}.body.json`) as EvaluateBody;
-  const draftEval = readStage5(`${file}.eval.json`);
+  const draftEval = structuredClone(readStage5(`${file}.eval.json`)) as RawEval;
+  edit(draftEval);
   const diff = diffVariant({
     currency: CZK,
     closedThrough: '2026-08',
@@ -32,7 +38,7 @@ function changedFor(file: string) {
     activeEval: parentEval,
     variantEval: draftEval,
   });
-  return changedPaths({ parentBody, draftBody, parentEval, draftEval, diff });
+  return changedPaths({ parentBody, draftBody, parentEval, draftEval, diff }, extra);
 }
 
 const bars: WidgetSpec = {
@@ -129,5 +135,93 @@ describe('kairon widgetInputs', () => {
     expect(out.draws[0]).toEqual({ sourceId: '7c1962e8-a12d-42ca-82cc-4bea10338044', period: '2026-09-01', amountMinor: '0' });
     expect(out.walk.sources.map((s) => s.name)).toEqual(['Bank Financing', 'Solstice Sponsor loan', 'Cedar Partners loan']);
     expect(out.sourceGroups.map((g) => g.partnerId ?? null)).toEqual([null, 'solstice', 'cedar']);
+  });
+});
+
+describe('kairon changedPaths with a widgets catalog (DEV-1380)', () => {
+  const COVER = [
+    { path: 'funding.draws', cells: 14 },
+    { path: 'exit.partners', cells: 2 },
+  ];
+
+  it('keeps the list as it was when no catalog path is asked for', () => {
+    // SCENARIO: the service runs with no widgets build; s2-v1 moves the net profit
+    // INPUT: s2-v1 against the active forecast, no extra paths
+    // EXPECTED: the four paths of before DEV-1380, no netProfit entry
+    expect(changedFor('s2-v1').map((c) => c.path)).toEqual(['plan.lines', 'funding.draws', 'walk.cumulativeNetCashMinor', 'exit.partners']);
+  });
+
+  it('counts netProfit as one cell when the profit moved', () => {
+    // SCENARIO: a widget reads netProfit; construction +8 % lowers the profit
+    // INPUT: s2-v1 against the active forecast, extra path netProfit
+    // EXPECTED: the four paths, then netProfit with 1 cell
+    expect(changedFor('s2-v1', ['netProfit'])).toEqual([
+      { path: 'plan.lines', cells: 46 },
+      { path: 'funding.draws', cells: 36 },
+      { path: 'walk.cumulativeNetCashMinor', cells: 23 },
+      { path: 'exit.partners', cells: 2 },
+      { path: 'netProfit', cells: 1 },
+    ]);
+  });
+
+  it('leaves netProfit out when the profit is the same', () => {
+    // SCENARIO: the cover draft moves draws between partners and keeps the profit
+    // INPUT: cover-cedar against the active forecast, all three catalog paths asked for
+    // EXPECTED: the two paths of the cover draft alone
+    expect(changedFor('cover-cedar', ['netProfit', 'exit.month', 'walk.uncoveredNeedMinor'])).toEqual(COVER);
+  });
+
+  it('counts exit.month as one cell when the exit moved', () => {
+    // SCENARIO: a widget reads exit.month; the draft exits three months later
+    // INPUT: cover-cedar with exit.month set to 2028-10 (the parent exits 2028-07), extra path exit.month
+    // EXPECTED: the cover paths, the exit as 1 moved event (the diff reads it as one), then exit.month with 1 cell
+    const changed = changedFor('cover-cedar', ['exit.month'], (evaluation) => {
+      evaluation.exit.month = '2028-10';
+    });
+    expect(changed).toEqual([...COVER, { path: 'events', cells: 1 }, { path: 'exit.month', cells: 1 }]);
+  });
+
+  it('counts walk.uncoveredNeedMinor by the months that differ', () => {
+    // SCENARIO: a widget reads the uncovered need; the draft leaves two months uncovered
+    // INPUT: cover-cedar with the uncovered need of 2026-10 and 2026-11 set to 500, extra path walk.uncoveredNeedMinor
+    // EXPECTED: the cover paths, then walk.uncoveredNeedMinor with 2 cells
+    const changed = changedFor('cover-cedar', ['walk.uncoveredNeedMinor'], (evaluation) => {
+      evaluation.walk.uncoveredNeedMinor['2026-10'] = '500';
+      evaluation.walk.uncoveredNeedMinor['2026-11'] = '500';
+    });
+    expect(changed).toEqual([...COVER, { path: 'walk.uncoveredNeedMinor', cells: 2 }]);
+  });
+
+  it('ignores an extra path it has no counter for', () => {
+    // SCENARIO: a newer widget reads a path this service does not count yet
+    // INPUT: cover-cedar, extra path sourceGroups
+    // EXPECTED: the cover paths alone
+    expect(changedFor('cover-cedar', ['sourceGroups'])).toEqual(COVER);
+  });
+});
+
+describe('kairon catalogPaths (DEV-1380)', () => {
+  it('lists the catalog paths the manifest reads, once each, in the service order', () => {
+    // SCENARIO: two widgets read overlapping paths, some counted always and one unknown
+    // INPUT: reads [walk.uncoveredNeedMinor, exit.partners, netProfit] and [netProfit, sourceGroups]
+    // EXPECTED: netProfit then walk.uncoveredNeedMinor; exit.partners is counted always and sourceGroups has no counter
+    const manifest = [{ reads: ['walk.uncoveredNeedMinor', 'exit.partners', 'netProfit'] }, { reads: ['netProfit', 'sourceGroups'] }];
+    expect(catalogPaths(manifest)).toEqual(['netProfit', 'walk.uncoveredNeedMinor']);
+  });
+});
+
+describe('kairon defaultCatalogSpec (DEV-1380)', () => {
+  const entry = (id: string, title: string) => ({ id, version: 1, title, whenToUse: '', reads: [], arity: 'pair' });
+
+  it('titles the two shipped widgets in Russian and any other by its manifest title', () => {
+    // SCENARIO: the LLM named no spec for a widget, so the server writes one; the page is Russian
+    // INPUT: manifest entries cash-line, kpi-tiles and need-rows (title «Need rows»)
+    // EXPECTED: the Russian titles for the first two, the manifest title for the third; an empty focus on each
+    const focus = { sourceIds: [], partnerIds: [], lineCodes: [] };
+    expect([entry('cash-line', 'Cumulative net cash'), entry('kpi-tiles', 'Key figures'), entry('need-rows', 'Need rows')].map(defaultCatalogSpec)).toEqual([
+      { widget: 'cash-line', title: 'Накопленный денежный поток', focus },
+      { widget: 'kpi-tiles', title: 'Ключевые показатели', focus },
+      { widget: 'need-rows', title: 'Need rows', focus },
+    ]);
   });
 });

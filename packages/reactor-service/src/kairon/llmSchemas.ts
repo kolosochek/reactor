@@ -156,8 +156,11 @@ export function explainJsonSchema(variantIds: string[], parties: string[] = ['ba
 
 const literal = (value: string): JsonSchema => ({ type: 'string', enum: [value] });
 
-/** kairon.planWidgets: per variant id, the declarative widget specs (widgets.ts WidgetSpecSchema). */
-export function widgetsJsonSchema(variantIds: string[]): ProposalJsonSchema {
+/**
+ * kairon.planWidgets: per variant id, the declarative widget specs (widgets.ts WidgetSpecSchema).
+ * `catalogSpec` is the spec schema of the loaded widgets catalog (DEV-1380), offered as one more alternative.
+ */
+export function widgetsJsonSchema(variantIds: string[], catalogSpec?: Record<string, unknown>): ProposalJsonSchema {
   const title: JsonSchema = { type: 'string', description: 'Russian widget title' };
   const specs: JsonSchema[] = [
     closed({
@@ -181,6 +184,7 @@ export function widgetsJsonSchema(variantIds: string[]): ProposalJsonSchema {
     closed({ widget: literal('condition-check'), title, goals: literal('active') }),
     closed({ widget: literal('stakeholder-table'), title, rows: arrayOf({ type: 'string' }, 'Party names') }),
   ];
+  if (catalogSpec !== undefined) specs.push(catalogSpec as JsonSchema);
   return closed({
     widgets: arrayOf(
       closed({ id: { type: 'string', enum: variantIds }, specs: arrayOf({ anyOf: specs }, 'Widgets for the changed paths') }),

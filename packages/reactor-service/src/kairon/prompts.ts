@@ -255,7 +255,15 @@ ${partners}`;
 
 // ---------- stage 5 (DEV-1375): widgets step and questions ----------
 
-export function widgetsSystemPrompt(): string {
+/** `catalog` lists the widgets of the loaded catalog (DEV-1380); empty, the prompt is the one of before. */
+export function widgetsSystemPrompt(catalog: Array<{ id: string; whenToUse: string; reads: string[] }> = []): string {
+  const catalogBlock =
+    catalog.length === 0
+      ? ''
+      : `CATALOG WIDGETS: the server draws one for a draft when a path it reads changed. You may add a spec {"widget", "title", "focus": {"sourceIds": [], "partnerIds": [], "lineCodes": []}} to give it a Russian title or to narrow its rows; empty focus lists show everything.
+${catalog.map((w) => `- ${w.id}: ${w.whenToUse} Reads: ${w.reads.join(', ')}.`).join('\n')}
+
+`;
   return `You pick widgets for forecast drafts. Each draft lists the JSON paths it changed against its parent and how many cells each changed. Existing widgets already show plan.lines, walk.cumulativeNetCashMinor, exit.partners and events. Pick declarative specs for what they do not show: you name a widget and the paths it reads, never HTML and never a figure.
 
 WIDGETS:
@@ -264,7 +272,7 @@ WIDGETS:
 - condition-check: the goal checks of the draft.
 - stakeholder-table: what the draft means for each party; rows are party names.
 
-Titles are Russian. Return only one JSON object {"widgets": [{"id", "specs": [...]}]} with one entry per draft.`;
+${catalogBlock}Titles are Russian. Return only one JSON object {"widgets": [{"id", "specs": [...]}]} with one entry per draft.`;
 }
 
 export function widgetsUserPrompt(variants: Array<{ id: string; changed: Array<{ path: string; cells: number }> }>): string {

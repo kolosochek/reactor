@@ -12,13 +12,27 @@ import { z } from 'zod';
 import type { VariantDiff } from './diff.js';
 import type { EvaluateBody } from './patch.js';
 import { changedPlanCells } from './reconcile.js';
+import type { CatalogSpec, WidgetCatalog, WidgetInstance, WidgetManifestEntry } from './widgetCatalog.js';
 
 export type ChangedPath = 'plan.lines' | 'funding.draws' | 'walk.cumulativeNetCashMinor' | 'exit.partners' | 'events';
 
+/**
+ * Paths counted only for a widgets catalog whose manifest reads them (DEV-1380). Without a catalog
+ * the list of changed paths, and so the widgets prompt, stays as it was.
+ */
+export const CATALOG_PATHS = ['netProfit', 'exit.month', 'walk.uncoveredNeedMinor'] as const;
+export type CatalogPath = (typeof CATALOG_PATHS)[number];
+
 /** A changed path and how many cells (lines' months, source-months, months, partners, events) it changed. */
 export interface PathChange {
-  path: ChangedPath;
+  path: ChangedPath | CatalogPath;
   cells: number;
+}
+
+/** The catalog paths a manifest's widgets read, once each, in the order of CATALOG_PATHS. */
+export function catalogPaths(manifest: Array<{ reads: string[] }>): CatalogPath[] {
+  const reads = new Set(manifest.flatMap((entry) => entry.reads));
+  return CATALOG_PATHS.filter((path) => reads.has(path));
 }
 
 export const EXISTING_WIDGETS: Record<Exclude<ChangedPath, 'funding.draws'>, 'bridge' | 'cash' | 'irr' | 'timeline'> = {
@@ -67,6 +81,9 @@ const WIDGET_PATHS: Record<WidgetSpec['widget'], ChangedPath[]> = {
   'stakeholder-table': ['funding.draws', 'exit.partners'],
 };
 
+/** The declarative widgets this service draws itself; any other name in an LLM reply is a catalog widget or unknown. */
+export const OWN_WIDGETS: readonly string[] = Object.keys(WIDGET_PATHS);
+
 const WidgetInputsShape = z.object({
   draws: z.array(z.object({ sourceId: z.string(), period: z.string(), amountMinor: z.string() })),
   walk: z.object({ sources: z.array(z.object({ id: z.string(), name: z.string() })), cashNeedMinor: z.record(z.string()) }),
@@ -88,6 +105,21 @@ const PathShape = z.object({
 
 type Evaluation = z.infer<typeof PathShape>;
 
+/** What the catalog paths read; parsed only when one of them is asked for. */
+const CatalogPathShape = z.object({
+  netProfit: z.string().nullable(),
+  exit: z.object({ month: z.string() }).nullable(),
+  walk: z.object({ uncoveredNeedMinor: z.record(z.string()) }),
+});
+
+type CatalogEvaluation = z.infer<typeof CatalogPathShape>;
+
+const CATALOG_COUNTERS: Record<CatalogPath, (parent: CatalogEvaluation, draft: CatalogEvaluation) => number> = {
+  netProfit: (parent, draft) => (parent.netProfit === draft.netProfit ? 0 : 1),
+  'exit.month': (parent, draft) => ((parent.exit?.month ?? null) === (draft.exit?.month ?? null) ? 0 : 1),
+  'walk.uncoveredNeedMinor': (parent, draft) => differing(parent.walk.uncoveredNeedMinor, draft.walk.uncoveredNeedMinor, '0'),
+};
+
 function drawCells(e: Evaluation): Map<string, bigint> {
   const cells = new Map<string, bigint>();
   for (const d of e.draws) {
@@ -103,13 +135,20 @@ function differing<V>(a: Map<string, V> | Record<string, V>, b: Map<string, V> |
   return [...new Set([...am.keys(), ...bm.keys()])].filter((k) => (am.get(k) ?? zero) !== (bm.get(k) ?? zero)).length;
 }
 
-export function changedPaths(input: {
-  parentBody: EvaluateBody;
-  draftBody: EvaluateBody;
-  parentEval: unknown;
-  draftEval: unknown;
-  diff: VariantDiff;
-}): PathChange[] {
+/**
+ * The paths a draft changed against its parent. `extra` names the catalog paths to count as well
+ * (the ones the loaded widgets read); a name with no counter is ignored.
+ */
+export function changedPaths(
+  input: {
+    parentBody: EvaluateBody;
+    draftBody: EvaluateBody;
+    parentEval: unknown;
+    draftEval: unknown;
+    diff: VariantDiff;
+  },
+  extra: readonly string[] = [],
+): PathChange[] {
   const parent = PathShape.parse(input.parentEval);
   const draft = PathShape.parse(input.draftEval);
   const irrOf = (e: Evaluation) => new Map((e.exit?.partners ?? []).map((p) => [p.partnerId, p.irr]));
@@ -120,6 +159,12 @@ export function changedPaths(input: {
     { path: 'exit.partners', cells: differing(irrOf(parent), irrOf(draft), null) },
     { path: 'events', cells: input.diff.events.filter((e) => e.active !== e.variant).length },
   ];
+  const asked = CATALOG_PATHS.filter((path) => extra.includes(path));
+  if (asked.length > 0) {
+    const catalogParent = CatalogPathShape.parse(input.parentEval);
+    const catalogDraft = CatalogPathShape.parse(input.draftEval);
+    for (const path of asked) counts.push({ path, cells: CATALOG_COUNTERS[path](catalogParent, catalogDraft) });
+  }
   return counts.filter((c) => c.cells > 0);
 }
 
@@ -154,4 +199,59 @@ export function withMandatory(specs: WidgetSpec[], changed: PathChange[]): Widge
     return reads.length === 0 || reads.some((p) => paths.has(p));
   });
   return paths.has('funding.draws') && !kept.some((s) => s.widget === 'matrix-diff') ? [MATRIX, ...kept] : kept;
+}
+
+// ---------- catalog widgets (DEV-1380) ----------
+
+/** Russian titles of the shipped catalog widgets; the manifest's own titles are English. */
+const CATALOG_TITLES_RU: Record<string, string> = {
+  'cash-line': 'Накопленный денежный поток',
+  'kpi-tiles': 'Ключевые показатели',
+};
+
+/** The spec the server writes for a catalog widget the LLM gave none for: a title and no narrowing. */
+export function defaultCatalogSpec(entry: Pick<WidgetManifestEntry, 'id' | 'title'>): CatalogSpec {
+  return { widget: entry.id, title: CATALOG_TITLES_RU[entry.id] ?? entry.title, focus: { sourceIds: [], partnerIds: [], lineCodes: [] } };
+}
+
+const Ids = z.array(z.string()).default([]);
+// normalizeStrictAnswer drops empty lists, so a focus arrives with its empty lists missing.
+const LlmCatalogSpec = z.object({
+  widget: z.string(),
+  title: z.string(),
+  focus: z.object({ sourceIds: Ids, partnerIds: Ids, lineCodes: Ids }).default({}),
+});
+
+/** A spec the LLM gave, as the package validates it; null for an unknown widget or a broken spec. */
+function llmCatalogSpec(catalog: WidgetCatalog, raw: unknown): CatalogSpec | null {
+  const parsed = LlmCatalogSpec.safeParse(raw);
+  if (!parsed.success) return null;
+  try {
+    return catalog.parseSpec(parsed.data);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The catalog widgets of one scored draft, in manifest order. The server decides which ones: a
+ * widget is drawn when the draft's scoring cut its data and one of the paths it reads changed.
+ * The LLM's spec gives the title and the focus; the default spec fills in when it gave none.
+ */
+export function catalogInstances(
+  catalog: WidgetCatalog,
+  variant: { changed: Array<{ path: string }>; widgetData: Record<string, unknown> | null },
+  llmSpecs: unknown[],
+): WidgetInstance[] {
+  const { widgetData } = variant;
+  if (widgetData === null) return [];
+  const paths = new Set(variant.changed.map((c) => c.path));
+  const given = new Map<string, CatalogSpec>();
+  for (const raw of llmSpecs) {
+    const spec = llmCatalogSpec(catalog, raw);
+    if (spec !== null && !given.has(spec.widget)) given.set(spec.widget, spec);
+  }
+  return catalog.manifest
+    .filter((entry) => Object.hasOwn(widgetData, entry.id) && (entry.reads.length === 0 || entry.reads.some((path) => paths.has(path))))
+    .map((entry) => catalog.instance(given.get(entry.id) ?? defaultCatalogSpec(entry), widgetData[entry.id]));
 }
