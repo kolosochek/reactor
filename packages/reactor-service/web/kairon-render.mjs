@@ -625,7 +625,35 @@ export function renderDiffView(view, currency = { ...CZK, currencyCode: 'CZK' })
 
 // ---------- styles ----------
 
+// ---------- catalog widgets (DEV-1380) ----------
+// The forecast widgets bundle (browser.mjs of the widgets package) draws an instance with
+// mount(host, instance, { locale }). The page has it only when the service runs with
+// KAIRON_WIDGETS_DIST; without it, and for a run recorded before DEV-1380, the page's own
+// renderers draw.
+
+/** The catalog instances of a draft from the widgets step of a run, by widget id; empty when the run has none. */
+export function instancesOf(out, variantId) {
+  const list = ((out.widgets || {}).instances || {})[variantId] || [];
+  return new Map(list.map((instance) => [instance.widget, instance]));
+}
+
+/**
+ * Mounts a catalog instance into `host` and returns the function that removes it. Returns null
+ * when the bundle is not loaded, the draft has no such instance or the bundle fails: the caller
+ * then draws with the page's own renderer.
+ */
+export function mountInstance(host, bundle, instance) {
+  if (!bundle || typeof bundle.mount !== 'function' || !instance) return null;
+  try {
+    return bundle.mount(host, instance, { locale: 'ru' });
+  } catch {
+    return null;
+  }
+}
+
 export const CARD_CSS = `
+/* The bundle's widgets take the page's colours through their CSS variables. */
+.k-catalog { --kw-ink: var(--ink); --kw-muted: var(--muted); --kw-border: var(--line); --kw-surface: var(--panel); --kw-good: var(--ok); --kw-bad: var(--bad); margin: 10px 0; }
 .k-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-secondary); display: flex; flex-direction: column; gap: 10px; }
 .k-widget { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--bg-secondary); }
 .k-wh { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; margin-bottom: 4px; }

@@ -27,6 +27,8 @@ interface RenderModule {
   renderRouteNote(route: unknown): string;
   answersOf(out: unknown): Array<{ parentId: string; text: string }>;
   sessionExport(session: unknown, meta: unknown): unknown;
+  instancesOf(out: unknown, variantId: string): Map<string, unknown>;
+  mountInstance(host: unknown, bundle: unknown, instance: unknown): (() => void) | null;
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -486,5 +488,78 @@ describe('kairon render: session export', () => {
       ],
     });
     expect(() => JSON.stringify(out)).not.toThrow();
+  });
+});
+
+describe('catalog widgets on the page (DEV-1380)', () => {
+  const cash = { widget: 'cash-line', version: 1, spec: { widget: 'cash-line', title: 'Деньги' }, data: { rows: 44 }, provenance: 'kairon' };
+  const kpi = { widget: 'kpi-tiles', version: 1, spec: { widget: 'kpi-tiles', title: 'Показатели' }, data: { tiles: 5 }, provenance: 'kairon' };
+  const host = { id: 'host' };
+
+  /** A stand-in for the bundle: records what mount() was called with and counts unmounts. */
+  function fakeBundle() {
+    const calls: unknown[][] = [];
+    let unmounted = 0;
+    return {
+      calls,
+      unmounted: () => unmounted,
+      mount: (...args: unknown[]) => {
+        calls.push(args);
+        return () => {
+          unmounted += 1;
+        };
+      },
+    };
+  }
+
+  it('reads the instances of a draft from the widgets step, by widget id', () => {
+    // SCENARIO: a run made with the widgets catalog carries instances per draft
+    // INPUT: out.widgets.instances = { v1: [kpi-tiles, cash-line] }; asked for v1 and for v2
+    // EXPECTED: v1 gives both instances by id, in order; v2 gives none
+    const out = { widgets: { widgets: {}, instances: { v1: [kpi, cash] } } };
+    expect([[...render.instancesOf(out, 'v1').entries()], [...render.instancesOf(out, 'v2').entries()]]).toEqual([
+      [
+        ['kpi-tiles', kpi],
+        ['cash-line', cash],
+      ],
+      [],
+    ]);
+  });
+
+  it('reads no instances from a run recorded before DEV-1380', () => {
+    // SCENARIO: a saved session of the old code replays on the new page
+    // INPUT: a run whose widgets step returned specs alone; a run with no widgets step
+    // EXPECTED: no instances for either, so the page draws with its own renderers
+    expect([render.instancesOf({ widgets: { widgets: { v1: [] } } }, 'v1').size, render.instancesOf({}, 'v1').size]).toEqual([0, 0]);
+  });
+
+  it('mounts an instance with the bundle, in Russian, and hands back the unmount', () => {
+    // SCENARIO: the bundle is loaded and the draft has a cash-line instance
+    // INPUT: a host, the bundle, the instance
+    // EXPECTED: one mount(host, instance, { locale: 'ru' }) call; the returned function unmounts once
+    const bundle = fakeBundle();
+    const unmount = render.mountInstance(host, bundle, cash);
+    unmount?.();
+    expect([bundle.calls, bundle.unmounted()]).toEqual([[[host, cash, { locale: 'ru' }]], 1]);
+  });
+
+  it('mounts nothing without the bundle or without an instance', () => {
+    // SCENARIO: no KAIRON_WIDGETS_DIST (the bundle is null), or a draft the widget was not cut for
+    // INPUT: (a) no bundle, an instance; (b) the bundle, no instance
+    // EXPECTED: null for both, and no mount call: the page falls back to its own renderer
+    const bundle = fakeBundle();
+    expect([render.mountInstance(host, null, cash), render.mountInstance(host, bundle, undefined), bundle.calls]).toEqual([null, null, []]);
+  });
+
+  it('falls back when the bundle fails to mount', () => {
+    // SCENARIO: a bundle that throws must not take the draft card down
+    // INPUT: a bundle whose mount throws
+    // EXPECTED: null
+    const broken = {
+      mount: () => {
+        throw new Error('boom');
+      },
+    };
+    expect(render.mountInstance(host, broken, cash)).toBeNull();
   });
 });
