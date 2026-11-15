@@ -391,15 +391,10 @@ export function renderOverview(explanation, scored) {
   ].join('');
 }
 
-// ---------- widgets (w1, w2, declarative specs) ----------
+// ---------- the goal check widget and shared figures helpers ----------
 
 const PALETTE = ['#2a78d6', '#6250d6', '#1baf7a', '#eda100', '#8a8f98'];
-const TAGS = {
-  'matrix-diff': 'w1 · таблица-дифф · всегда',
-  'bars-before-after': 'w2 · было / стало',
-  'condition-check': 'b1 · цели',
-  'stakeholder-table': 'стороны',
-};
+const TAGS = { 'condition-check': 'b1 · цели' };
 
 /** A signed delta in millions with a typographic minus; zero reads ±0,0. */
 export function delta(minor, currency = CZK) {
@@ -409,148 +404,15 @@ export function delta(minor, currency = CZK) {
   return value > 0 ? `+${text}` : `−${text}`;
 }
 
-function drawCells(evaluation) {
-  const cells = new Map();
-  for (const d of evaluation.draws ?? []) {
-    const key = `${d.sourceId}|${d.period.slice(0, 7)}`;
-    cells.set(key, (cells.get(key) ?? 0n) + BigInt(d.amountMinor));
-  }
-  return cells;
-}
-
-function goalWindow(variant) {
-  return new Set((variant.goalChecks ?? []).flatMap((c) => c.months.map((m) => m.month)));
-}
-
-/** The months a widget shows: every month with a changed cell, plus the goal window. */
-function shownMonths(parent, draft, window) {
-  const months = new Set(window);
-  for (const key of new Set([...parent.keys(), ...draft.keys()])) {
-    if ((parent.get(key) ?? 0n) !== (draft.get(key) ?? 0n)) months.add(key.slice(key.indexOf('|') + 1));
-  }
-  return [...months].sort();
-}
-
-function drawsView(variant, parentEval, draftEval) {
-  const parent = drawCells(parentEval);
-  const draft = drawCells(draftEval);
-  const window = goalWindow(variant);
-  const sources = (draftEval.walk?.sources ?? []).map((s) => ({ id: s.id, name: s.name }));
-  return { parent, draft, window, sources, months: shownMonths(parent, draft, window) };
-}
-
-function matrixDiff(variant, parentEval, draftEval, currency) {
-  const v = drawsView(variant, parentEval, draftEval);
-  const hasWindow = v.window.size > 0;
-  const sum = (minor) => (minor === 0n ? `<td class="sum">${delta(minor, currency)}</td>` : `<td class="sum"><b>${delta(minor, currency)}</b></td>`);
-  const head =
-    `<tr><th>Источник, млн</th>${v.months.map((m) => `<th class="m">${esc(m)}</th>`).join('')}` +
-    `${hasWindow ? '<th>Δ в окне</th>' : ''}<th>Σ Δ</th></tr>`;
-  const rows = v.sources.map((s) => {
-    let inWindow = 0n;
-    let total = 0n;
-    const cells = v.months.map((m) => {
-      const before = v.parent.get(`${s.id}|${m}`) ?? 0n;
-      const after = v.draft.get(`${s.id}|${m}`) ?? 0n;
-      const d = after - before;
-      total += d;
-      if (v.window.has(m)) inWindow += d;
-      if (d === 0n) return `<td class="same">${after === 0n ? '—' : millions(after, currency)}</td>`;
-      return `<td class="chg"><b>${millions(after, currency)}</b><small>${delta(d, currency)}</small></td>`;
-    });
-    return `<tr><td>${esc(s.name)}</td>${cells.join('')}${hasWindow ? sum(inWindow) : ''}${sum(total)}</tr>`;
-  });
-  const need = draftEval.walk?.cashNeedMinor ?? {};
-  const needRow =
-    `<tr class="k-need"><td class="k-muted">Потребность</td>` +
-    `${v.months.map((m) => `<td class="same">${millions(need[m] ?? '0', currency)}</td>`).join('')}` +
-    `${hasWindow ? '<td></td>' : ''}<td></td></tr>`;
-  const legend =
-    '<div class="k-legend"><span>жёлтая ячейка: транш изменён, под ним Δ к родителю</span>' +
-    (hasWindow ? '<span>Δ в окне: за месяцы цели</span>' : '') +
-    '<span>Σ Δ: за все показанные месяцы</span></div>';
-  return `<table class="k-t k-matrix">${head}${rows.join('')}${needRow}</table>${legend}`;
-}
-
-/** The source whose delta labels the bars: the cover goal's partner, else the largest total change. */
-function labelledSource(v, variant, draftEval) {
-  const partnerId = (variant.goalChecks ?? []).find((c) => c.goal?.type === 'funding_cover')?.goal.partnerId;
-  const group = (draftEval.sourceGroups ?? []).find((g) => partnerId !== undefined && g.partnerId === partnerId);
-  const byGoal = v.sources.find((s) => group !== undefined && s.id === group.sourceId);
-  if (byGoal !== undefined) return byGoal;
-  const moved = (s) =>
-    v.months.reduce((acc, m) => {
-      const d = (v.draft.get(`${s.id}|${m}`) ?? 0n) - (v.parent.get(`${s.id}|${m}`) ?? 0n);
-      return acc + (d < 0n ? -d : d);
-    }, 0n);
-  return v.sources.reduce((best, s) => (best === null || moved(s) > moved(best) ? s : best), null);
-}
-
-function barsBeforeAfter(variant, parentEval, draftEval, currency) {
-  const v = drawsView(variant, parentEval, draftEval);
-  if (v.months.length === 0) return '<div class="k-muted">Транши не изменились.</div>';
-  const height = (cells, m) => v.sources.reduce((acc, s) => acc + Math.max(Number(cells.get(`${s.id}|${m}`) ?? 0n), 0), 0);
-  const max = Math.max(1, ...v.months.flatMap((m) => [height(v.parent, m), height(v.draft, m)]));
-  // At least 52 units per month keeps the month and delta labels apart; a wider chart scrolls inside its card.
-  const slot = Math.max(406 / v.months.length, 52);
-  const plotRight = 30 + v.months.length * slot;
-  const w = Math.max(Math.min(18, slot / 2 - 3), 2);
-  const scale = (minor) => (152 * Math.max(Number(minor), 0)) / max;
-  const labelled = labelledSource(v, variant, draftEval);
-  const stack = (cells, m, x, opacity) => {
-    let y = 166;
-    return v.sources
-      .map((s, i) => {
-        const h = scale(cells.get(`${s.id}|${m}`) ?? 0n);
-        y -= h;
-        return h === 0 ? '' : `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${PALETTE[i % PALETTE.length]}" opacity="${opacity}"/>`;
-      })
-      .join('');
-  };
-  const windowed = v.months.filter((m) => v.window.has(m));
-  const shade =
-    windowed.length === 0
-      ? ''
-      : `<rect x="${(30 + v.months.indexOf(windowed[0]) * slot).toFixed(1)}" y="14" width="${(windowed.length * slot).toFixed(1)}" height="152" fill="#eda100" opacity=".07"/><text x="${(34 + v.months.indexOf(windowed[0]) * slot).toFixed(1)}" y="24">окно цели</text>`;
-  const pairs = v.months.map((m, i) => {
-    const x0 = 30 + i * slot + (slot - 2 * w - 2) / 2;
-    const d = labelled === null ? 0n : (v.draft.get(`${labelled.id}|${m}`) ?? 0n) - (v.parent.get(`${labelled.id}|${m}`) ?? 0n);
-    const top = 166 - scale(height(v.draft, m));
-    const label = d === 0n ? '' : `<text class="ink" x="${(x0 + 1.5 * w + 2).toFixed(1)}" y="${(top - 4).toFixed(1)}" text-anchor="middle">${delta(d, currency)}</text>`;
-    return (
-      `<g class="k-pair" data-month="${esc(m)}">${stack(v.parent, m, x0, '0.38')}${stack(v.draft, m, x0 + w + 2, '1')}${label}` +
-      `<text x="${(x0 + w + 1).toFixed(1)}" y="182" text-anchor="middle">${esc(m)}</text></g>`
-    );
-  });
-  const swatches = v.sources.map((s, i) => `<span><span class="k-sw" style="background:${PALETTE[i % PALETTE.length]}"></span>${esc(s.name)}</span>`);
-  const note = labelled === null ? '' : ` · подпись: Δ ${esc(labelled.name)}, млн`;
+/**
+ * The one declarative widget the page draws itself: the draft's goal checks (DEV-1381). Every
+ * figure is a catalog widget of the bundle. A spec of a widget the catalog replaced (matrix-diff,
+ * bars-before-after, stakeholder-table, in a session recorded before DEV-1381) draws nothing.
+ */
+export function renderWidget(spec, variant) {
+  if (spec.widget !== 'condition-check') return '';
   return (
-    `<svg viewBox="0 0 ${Math.round(plotRight + 4)} 190" width="${Math.round((plotRight + 4) * 1.5)}" height="285" role="img" aria-label="Транши по месяцам: родитель и черновик">` +
-    `<line x1="30" x2="${plotRight.toFixed(1)}" y1="166" y2="166" stroke="var(--border)" stroke-width="1"/>${shade}${pairs.join('')}</svg>` +
-    `<div class="k-legend">${swatches.join('')}<span>бледный: родитель · яркий: черновик${note}</span></div>`
-  );
-}
-
-function stakeholderTable(spec, variant) {
-  const rows = spec.rows.map((name) => {
-    const partner = (variant.metrics?.partners ?? []).find((p) => p.name === name);
-    const irr = partner === undefined || partner.irr === null ? '—' : percent(partner.irr);
-    return `<tr><td>${esc(name)}</td><td>${esc(irr)}</td></tr>`;
-  });
-  return `<table class="k-t"><tr><th>Сторона</th><th>IRR</th></tr>${rows.join('')}</table>`;
-}
-
-export function renderWidget(spec, variant, parentEval, draftEval, currency = CZK) {
-  const body =
-    spec.widget === 'matrix-diff'
-      ? matrixDiff(variant, parentEval, draftEval, currency)
-      : spec.widget === 'bars-before-after'
-        ? barsBeforeAfter(variant, parentEval, draftEval, currency)
-        : spec.widget === 'condition-check'
-          ? renderGoalChecks(variant.goalChecks ?? [])
-          : stakeholderTable(spec, variant);
-  return (
-    `<div class="k-widget"><div class="k-wh"><b>${esc(spec.title)}</b><span class="k-tag">${TAGS[spec.widget] ?? esc(spec.widget)}</span></div>${body}` +
+    `<div class="k-widget"><div class="k-wh"><b>${esc(spec.title)}</b><span class="k-tag">${TAGS[spec.widget]}</span></div>${renderGoalChecks(variant.goalChecks ?? [])}` +
     `<details class="k-specd"><summary>спецификация виджета</summary><pre class="k-spec">${esc(JSON.stringify(spec, null, 1))}</pre></details></div>`
   );
 }
@@ -625,11 +487,13 @@ export function renderDiffView(view, currency = { ...CZK, currencyCode: 'CZK' })
 
 // ---------- styles ----------
 
-// ---------- catalog widgets (DEV-1380) ----------
-// The forecast widgets bundle (browser.mjs of the widgets package) draws an instance with
-// mount(host, instance, { locale }). The page has it only when the service runs with
-// KAIRON_WIDGETS_DIST; without it, and for a run recorded before DEV-1380, the page's own
-// renderers draw.
+// ---------- catalog widgets (DEV-1380, DEV-1381) ----------
+//
+// The service assembles widget instances per draft (kairon.planWidgets, `instances`), and the
+// forecast widgets bundle draws them: mount(host, instance, { locale }). Every figure of a draft
+// is such an instance; the page has no renderer of its own for them. An instance the bundle
+// cannot draw gets one line in its place that names the cause: no bundle, a stale build, a
+// version the bundle lacks, data that breaks the widget's schema.
 
 /** The catalog instances of a draft from the widgets step of a run, in the server's order; empty when the run has none. */
 export function instancesOf(out, variantId) {
@@ -637,66 +501,82 @@ export function instancesOf(out, variantId) {
 }
 
 /**
- * The imported bundle, when it is of the build the service stated in GET /kairon/widgets; null
- * otherwise. The service cuts widget data with core.mjs of one build, so a browser.mjs of another
- * build (a stale file, a half-finished rebuild) may read that data differently.
+ * The line for a run made with no widgets catalog, whose drafts therefore have no instance at
+ * all; null for a run that has instances.
  */
-export function acceptBundle(module, info) {
-  if (!module || typeof module.mount !== 'function') return null;
-  return info && typeof info.buildId === 'string' && module.buildId === info.buildId ? module : null;
+export function runFigureLine(out) {
+  return (out.widgets || {}).instances ? null : 'Фигуры не нарисованы: прогон сделан без каталога виджетов (сервис работал без KAIRON_WIDGETS_DIST).';
 }
 
 /**
- * Whether `bundle` draws `instance`: the same build, the widget in the bundle's manifest at the
- * instance's version, data that parses. False without a bundle or an instance.
+ * The bundle the page draws with, or why it has none. `info` is the answer of GET /kairon/widgets,
+ * `module` the imported browser.mjs (null when the service names none or the import failed, with
+ * `error` as the reason). The service cuts widget data with core.mjs of one build, so a
+ * browser.mjs of another build (a stale file, a half-finished rebuild) is refused.
  */
-function bundleDraws(bundle, instance) {
-  if (!bundle || typeof bundle.mount !== 'function' || !instance) return false;
-  if (!bundle.catalog || typeof bundle.buildId !== 'string' || instance.buildId !== bundle.buildId) return false;
+export function bundleState(info, module, error) {
+  const none = (cause, problem) => ({ bundle: null, cause, problem });
+  if (!info || !info.bundle) return none('no-bundle', 'сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась)');
+  if (!module || typeof module.mount !== 'function' || !module.catalog) return none('no-bundle', 'бандл виджетов не загрузился' + (error ? ': ' + error : ''));
+  if (module.buildId !== info.buildId) return none('stale-build', `сервис называет сборку ${info.buildId}, загруженный бандл собран как ${module.buildId}`);
+  return { bundle: module, cause: null, problem: null };
+}
+
+/**
+ * Why the bundle of `state` cannot draw `instance`, as { cause, text }; null when it can. The
+ * causes: no-bundle; stale-build (the instance was assembled by another build: a session replayed
+ * after a rebuild carries the old build id, one recorded before the stamp carries none); version
+ * (the bundle's manifest lacks the widget or has another version of it); data (the data does not
+ * parse against the widget's schema in the bundle).
+ */
+export function instanceProblem(state, instance) {
+  const { bundle } = state;
+  if (!bundle) return { cause: state.cause, text: state.problem };
+  if (instance.buildId !== bundle.buildId) {
+    const made = typeof instance.buildId === 'string' ? `сборкой ${instance.buildId}` : 'без отметки сборки';
+    return { cause: 'stale-build', text: `данные собраны ${made}, страница загрузила сборку ${bundle.buildId}` };
+  }
+  const known = bundle.catalog.manifest().find((entry) => entry.id === instance.widget);
+  if (!known) return { cause: 'version', text: `в загруженной сборке нет виджета ${instance.widget}` };
+  if (known.version !== instance.version) return { cause: 'version', text: `в данных версия виджета ${instance.version}, в загруженной сборке ${known.version}` };
   try {
-    const known = bundle.catalog.manifest().find((entry) => entry.id === instance.widget);
-    if (!known || known.version !== instance.version) return false;
     bundle.catalog.parseData(instance.widget, instance.data);
-    return true;
   } catch {
-    return false;
+    return { cause: 'data', text: 'данные не проходят схему виджета' };
   }
+  return null;
+}
+
+/** The line the page shows in place of a figure it cannot draw. */
+export function figureLine(instance, problem) {
+  const title = (instance.spec && instance.spec.title) || instance.widget;
+  return `«${title}»: фигура не нарисована, ${problem.text}.`;
 }
 
 /**
- * Mounts a catalog instance into `host` and returns the function that removes it. Returns null
- * when the bundle is not loaded, there is no instance, the instance was assembled by another
- * build (a session replayed after a rebuild carries the old build id, a session recorded before
- * the stamp carries none), its version or data does not fit the bundle, or the bundle fails.
+ * Places the instances of a draft in the server's order. The page names no widget id: which
+ * widgets a draft gets is the server's decision, and what the bundle draws is read from the
+ * bundle's manifest. An instance the bundle draws is mounted into the element `hostOf(instance)`
+ * makes and comes back as { instance, host, unmount }; any other comes back as
+ * { instance, cause, line }, and the page shows the line where the figure would be.
  */
-export function mountInstance(host, bundle, instance) {
-  if (!bundleDraws(bundle, instance)) return null;
-  try {
-    return bundle.mount(host, instance, { locale: 'ru' });
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Mounts every instance the bundle draws, in the order the server assembled them (DEV-1381). The
- * page names no widget id: which widgets a draft gets is the server's decision, and what the
- * bundle can draw is read from the bundle's manifest. `hostOf(instance)` makes the element of one
- * instance; it is called only for an instance the bundle draws. Returns the hosts with their unmounts.
- */
-export function mountInstances(bundle, instances, hostOf) {
-  const mounted = [];
-  for (const instance of instances) {
-    if (!bundleDraws(bundle, instance)) continue;
+export function placeInstances(state, instances, hostOf) {
+  return instances.map((instance) => {
+    const problem = instanceProblem(state, instance);
+    if (problem) return { instance, cause: problem.cause, line: figureLine(instance, problem) };
     const host = hostOf(instance);
-    const unmount = mountInstance(host, bundle, instance);
-    if (unmount) mounted.push({ host, unmount });
-  }
-  return mounted;
+    try {
+      return { instance, host, unmount: state.bundle.mount(host, instance, { locale: 'ru' }) };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return { instance, cause: 'mount', line: figureLine(instance, { text: `виджет не нарисовался: ${reason}` }) };
+    }
+  });
 }
 
 export const CARD_CSS = `
 /* The bundle's widgets take the page's colours through their CSS variables. */
+.k-nofigure { border: 1px dashed var(--border); border-radius: 8px; padding: 6px 10px; margin: 10px 0; font-size: 12px; color: var(--text-secondary); }
 .k-catalog { --kw-ink: var(--ink); --kw-muted: var(--muted); --kw-border: var(--line); --kw-surface: var(--panel); --kw-good: var(--ok); --kw-bad: var(--bad); margin: 10px 0; }
 .k-card { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-secondary); display: flex; flex-direction: column; gap: 10px; }
 .k-widget { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--bg-secondary); }

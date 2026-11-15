@@ -442,41 +442,21 @@ svg text { font-size: 11px; }
 
   // ---------- CFO report (stage 4) ----------
   // From the general to the specific: the answer, the variants as tabs, then for the
-  // selected one the story, key figures, timeline, cash, funding and the profit bridge.
-  // Every figure comes from Kairon evaluate (scoreVariants.diff and facts); the LLM text
-  // carries them only through placeholders.
+  // selected one the story. The figures of a draft are catalog widgets, mounted in its
+  // card (DEV-1381). Every figure comes from Kairon evaluate; the LLM text carries them
+  // only through placeholders.
   const MONTHS_RU = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const monthLabel = (m) => m ? MONTHS_RU[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4) : '—';
-  const monthIndex = (m) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1;
   const NF0 = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 });
   const NF1 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const NF2 = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const money = { decimals: 2, code: 'CZK' };
   const mln = (minor) => (minor === null || minor === undefined) ? null : Number(minor) / Math.pow(10, money.decimals) / 1e6;
-  const fmtMln = (v) => (v < 0 ? '−' : '') + (Math.abs(v) >= 100 ? NF0.format(Math.abs(v)) : NF1.format(Math.abs(v))) + ' млн';
   const fmtDeltaMln = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + (Math.abs(v) >= 100 ? NF0.format(Math.abs(v)) : NF1.format(Math.abs(v))) + ' млн';
   const fmtPct = (x) => NF2.format(x * 100) + ' %';
   const fmtPp = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + NF2.format(Math.abs(v)) + ' п.п.';
-  const fmtMonths = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v) + ' мес';
   const colorOf = (id) => id === 'active' ? 'var(--active)' : 'var(--v' + Math.min(Math.max(parseInt(id.slice(1), 10) || 1, 1), 4) + ')';
   const dot = (id) => { const d = el('span', { class: 'dot' }); d.style.background = colorOf(id); return d; };
-  const txt = (x, y, text, attrs) => { const t = svgEl('text', Object.assign({ x: x, y: y }, attrs || {})); t.textContent = text; return t; };
-
-  /** Clean ticks for a value range, always including 0. */
-  function ticks(lo, hi, count) {
-    const lo0 = Math.min(lo, 0), hi0 = Math.max(hi, 0);
-    const raw = (hi0 - lo0) / count || 1;
-    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-    const step = [1, 2, 2.5, 5, 10].map((k) => k * mag).find((k) => k >= raw) || 10 * mag;
-    const out = [];
-    const end = Math.ceil(hi0 / step - 1e-9) * step;
-    for (let v = Math.floor(lo0 / step + 1e-9) * step; v <= end + step * 0.001; v += step) out.push(Math.round(v * 1e6) / 1e6);
-    return out;
-  }
-
-  function section(title, sub, body) {
-    return el('div', { class: 'r-sec' }, [el('h4', { text: title }), sub ? el('div', { class: 'sub', text: sub }) : null, body]);
-  }
 
   function irrBullet(promise, active, delayOnly, value, color) {
     const W = 200, H = 22;
@@ -530,270 +510,6 @@ svg text { font-size: 11px; }
     return card;
   }
 
-  function tile(label, value, was, delta, betterUp, fmt) {
-    let cls = 'flat', arrow = '';
-    if (delta !== null && Math.abs(delta) > 1e-9) {
-      arrow = delta > 0 ? '▲ ' : '▼ ';
-      if (betterUp !== null) cls = (delta > 0) === betterUp ? 'good' : 'bad';
-    }
-    return el('div', { class: 'tile' }, [
-      el('span', { class: 'lbl', text: label }),
-      el('span', { class: 'val', text: value }),
-      delta === null ? null : el('span', { class: 'dl ' + cls, text: arrow + fmt(delta) + ' к активному' }),
-      was ? el('span', { class: 'was', text: 'было ' + was }) : null
-    ]);
-  }
-
-  /** `skipNetProfit`: the bundle's kpi-tiles already shows the net profit above this row (DEV-1380). */
-  function kpiTiles(v, d, ctx) {
-    const an = mln(d.profit.activeNetMinor), vn = mln(d.profit.variantNetMinor);
-    const ae = mln(d.profit.activeExitMinor), ve = mln(d.profit.variantExitMinor);
-    const at = d.cash.activeTrough, vt = d.cash.variantTrough;
-    const ap = d.cash.activePositive, vp = d.cash.variantPositive;
-    const ai = mln(d.interest.activeMinor), vi = mln(d.interest.variantMinor);
-    const altv = ctx.active.ltvBp, vltv = v.metrics.ltvBp;
-    return el('div', { class: 'tiles' }, [
-      tile('Чистая прибыль', fmtMln(vn), fmtMln(an), vn - an, true, fmtDeltaMln),
-      ae !== null && ve !== null ? tile('Прибыль на выходе, партнёрам', fmtMln(ve), fmtMln(ae), ve - ae, true, fmtDeltaMln) : null,
-      vt && at ? tile('Дно денег проекта', fmtMln(mln(vt.minor)) + ' · ' + monthLabel(vt.month), fmtMln(mln(at.minor)) + ' · ' + monthLabel(at.month), mln(vt.minor) - mln(at.minor), true, fmtDeltaMln) : null,
-      vp && ap ? tile('Деньги снова в плюсе', monthLabel(vp), monthLabel(ap), monthIndex(vp) - monthIndex(ap), false, fmtMonths) : null,
-      tile('Проценты по источникам', fmtMln(vi), fmtMln(ai), vi - ai, false, fmtDeltaMln),
-      // LTV's denominator is the plan's revenue, so a price lever moves it by assumption: no good/bad colour
-      altv !== null && vltv !== null ? tile('LTV банка (база: выручка плана)', NF2.format(vltv / 100) + ' %', NF2.format(altv / 100) + ' %', (vltv - altv) / 100, null, fmtPp) : null
-    ]);
-  }
-
-  /** Month axis shared by the timeline and the charts: x of a month's centre. */
-  function monthScale(months, left, width) {
-    const first = monthIndex(months[0]), step = width / months.length;
-    return { step: step, x: (m) => left + (monthIndex(m) - first + 0.5) * step, left: left, right: left + width };
-  }
-
-  function closedBand(svg, sc, months, closedThrough, y0, y1) {
-    if (!closedThrough || closedThrough < months[0]) return;
-    const x1 = sc.x(closedThrough) + sc.step / 2;
-    svg.appendChild(svgEl('rect', { x: sc.left, y: y0, width: Math.max(x1 - sc.left, 0), height: y1 - y0 }, { fill: 'var(--closed)' }));
-    svg.appendChild(txt(sc.left + 4, y0 + 12, 'факт по ' + monthLabel(closedThrough)));
-  }
-
-  function yearTicks(svg, sc, months, y0, y1, labelY) {
-    months.forEach((m) => {
-      if (m.slice(5) !== '01') return;
-      const x = sc.x(m) - sc.step / 2;
-      svg.appendChild(svgEl('line', { x1: x, x2: x, y1: y0, y2: y1 }, { stroke: 'var(--grid)', 'stroke-width': '1' }));
-      svg.appendChild(txt(x + 3, labelY, m.slice(0, 4)));
-    });
-  }
-
-  function timeline(v, d, milestones) {
-    const months = d.axis.months, W = 960, L = 120, R = 64, top = 36, rowH = 40;
-    const rows = d.spans, H = top + rows.length * rowH + 26;
-    const sc = monthScale(months, L, W - L - R);
-    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'vchart', role: 'img', 'aria-label': 'Сроки: активный прогноз и вариант ' + v.id });
-    const bottom = top + rows.length * rowH;
-    closedBand(svg, sc, months, d.axis.closedThrough, top - 8, bottom);
-    yearTicks(svg, sc, months, top - 8, bottom, bottom + 16);
-    // milestones of the version, as stored (evaluate does not move them); a label is
-    // drawn only where it does not run into the previous one, the rest show on hover
-    svg.appendChild(txt(L - 10, 17, 'Вехи версии', { class: 'lbl', 'text-anchor': 'end' }));
-    let labelEnd = -Infinity;
-    const shown = (milestones || [])
-      .map((ms) => ({ ms: ms, m: ms.dueDate ? ms.dueDate.slice(0, 7) : null }))
-      .filter((it) => it.m && it.m >= months[0] && it.m <= months[months.length - 1])
-      .sort((a, b) => (a.m < b.m ? -1 : a.m > b.m ? 1 : 0));
-    shown.forEach((it, i) => {
-        const x = sc.x(it.m);
-        const next = shown[i + 1];
-        const nextX = next ? sc.x(next.m) - 8 : W;
-        const g = svgEl('g', {});
-        g.appendChild(svgEl('path', { d: 'M' + x + ' 7 l5 5 l-5 5 l-5 -5 z' }, { fill: it.ms.completedAt ? 'var(--ink)' : 'var(--panel)', stroke: 'var(--ink)', 'stroke-width': '1.5' }));
-        const t = svgEl('title', {}); t.textContent = it.ms.name + ': ' + it.ms.dueDate + (it.ms.completedAt ? ', выполнена' : '') + '. Evaluate не переносит вехи; сдвиг читается по событиям ниже.'; g.appendChild(t);
-        const width = it.ms.name.length * 6.2;
-        if (x + 8 > labelEnd + 10 && x + 8 + width < nextX) {
-          g.appendChild(txt(x + 8, 16, it.ms.name));
-          labelEnd = x + 8 + width;
-        }
-        svg.appendChild(g);
-      });
-    rows.forEach((row, i) => {
-      const y = top + i * rowH;
-      svg.appendChild(txt(L - 10, y + 20, row.label, { class: 'lbl', 'text-anchor': 'end' }));
-      const bar = (span, yy, color, who) => {
-        if (!span) return;
-        const x0 = sc.x(span.from) - sc.step / 2, x1 = sc.x(span.to) + sc.step / 2;
-        const r = svgEl('rect', { x: x0, y: yy, width: Math.max(x1 - x0, 2), height: 7, rx: 3.5 }, { fill: color });
-        const t = svgEl('title', {}); t.textContent = row.label + ', ' + who + ': ' + monthLabel(span.from) + ' — ' + monthLabel(span.to); r.appendChild(t);
-        svg.appendChild(r);
-      };
-      bar(row.active, y + 9, 'var(--axis)', 'активный прогноз');
-      bar(row.variant, y + 20, colorOf(v.id), v.id);
-      if (row.active && row.variant && row.active.to !== row.variant.to) {
-        const shift = monthIndex(row.variant.to) - monthIndex(row.active.to);
-        svg.appendChild(txt(sc.right + 8, y + 27, fmtMonths(shift), { class: 'ink' }));
-      }
-    });
-    // events: hollow = active, filled = variant, joined by a line when they differ
-    const eventRow = { constructionEnd: 1, mainHandover: 0, exit: null };
-    d.events.forEach((ev) => {
-      if (ev.key === 'exit') {
-        [[ev.active, 'var(--axis)', 'выход: активный'], [ev.variant, colorOf(v.id), 'выход: ' + v.id]].forEach(([m, color, who], k) => {
-          if (!m) return;
-          const x = sc.x(m) + sc.step / 2;
-          svg.appendChild(svgEl('line', { x1: x, x2: x, y1: top - 8, y2: bottom }, { stroke: color, 'stroke-width': k === 0 ? '1' : '2' }));
-          if (k === 1) svg.appendChild(txt(x - 4, bottom + 16, 'выход ' + monthLabel(m), { class: 'ink', 'text-anchor': 'end' }));
-        });
-        return;
-      }
-      const ri = eventRow[ev.key];
-      if (ri === null || ri === undefined || !ev.active || !ev.variant) return;
-      const y = top + ri * rowH + 18;
-      const xa = sc.x(ev.active), xv = sc.x(ev.variant);
-      if (xa !== xv) svg.appendChild(svgEl('line', { x1: xa, x2: xv, y1: y, y2: y }, { stroke: 'var(--ink)', 'stroke-width': '1' }));
-      svg.appendChild(svgEl('circle', { cx: xa, cy: y, r: 4.5 }, { fill: 'var(--panel)', stroke: 'var(--ink)', 'stroke-width': '1.5' }));
-      const c = svgEl('circle', { cx: xv, cy: y, r: 5 }, { fill: 'var(--ink)', stroke: 'var(--panel)', 'stroke-width': '2' });
-      const t = svgEl('title', {}); t.textContent = ev.label + ': ' + monthLabel(ev.active) + ' → ' + monthLabel(ev.variant); c.appendChild(t);
-      svg.appendChild(c);
-    });
-    const key = el('div', { class: 'key' }, [
-      el('span', {}, [el('span', { class: 'dot', style: 'background: var(--axis); border-radius: 3px; width: 18px; height: 7px' }), ' активный прогноз']),
-      el('span', {}, [el('span', { class: 'dot', style: 'background: ' + colorOf(v.id) + '; border-radius: 3px; width: 18px; height: 7px' }), ' ' + v.id]),
-      el('span', { text: '○ → ● основная передача и конец стройки: было → стало' })
-    ]);
-    return el('div', {}, [el('div', { class: 'scrollx' }, [el('div', { class: 'chartwrap' }, [svg])]), key]);
-  }
-
-  /** A line chart on the shared month axis with a crosshair tooltip. series: [{label, color, values (minor|null)}]. */
-  function lineChart(opts) {
-    const months = opts.months, W = opts.width || 960, H = opts.height || 240, L = opts.left || 64, R = opts.right || 92, T = 22, B = 26;
-    const sc = monthScale(months, L, W - L - R);
-    const series = opts.series.map((s) => Object.assign({}, s, { mv: s.values.map(mln) }));
-    const all = [];
-    series.forEach((s) => s.mv.forEach((v) => { if (v !== null) all.push(v); }));
-    const tk = ticks(Math.min.apply(null, all), Math.max.apply(null, all), 4);
-    const lo = tk[0], hi = tk[tk.length - 1];
-    const y = (v) => T + (hi - v) / (hi - lo || 1) * (H - T - B);
-    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'vchart', role: 'img', 'aria-label': opts.aria });
-    closedBand(svg, sc, months, opts.closedThrough, T, H - B);
-    tk.forEach((t) => {
-      svg.appendChild(svgEl('line', { x1: L, x2: W - R, y1: y(t), y2: y(t) }, { stroke: t === 0 ? 'var(--axis)' : 'var(--grid)', 'stroke-width': '1' }));
-      svg.appendChild(txt(L - 6, y(t) + 4, (Math.abs(t) >= 1000 ? NF0.format(t) : NF0.format(t)), { 'text-anchor': 'end' }));
-    });
-    yearTicks(svg, sc, months, H - B, H - B + 4, H - 8);
-    series.forEach((s) => {
-      let dpath = '', pen = false;
-      s.mv.forEach((v, i) => {
-        if (v === null) { pen = false; return; }
-        dpath += (pen ? 'L' : 'M') + sc.x(months[i]).toFixed(1) + ' ' + y(v).toFixed(1) + ' ';
-        pen = true;
-      });
-      svg.appendChild(svgEl('path', { d: dpath }, { fill: 'none', stroke: s.color, 'stroke-width': '2', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
-      let last = -1;
-      s.mv.forEach((v, i) => { if (v !== null) last = i; });
-      if (last >= 0) {
-        svg.appendChild(svgEl('circle', { cx: sc.x(months[last]), cy: y(s.mv[last]), r: 4 }, { fill: s.color, stroke: 'var(--panel)', 'stroke-width': '2' }));
-        if (s.endLabel !== false) svg.appendChild(txt(sc.x(months[last]) + 8, y(s.mv[last]) + 4, s.label, { class: 'ink' }));
-      }
-    });
-    (opts.markers || []).forEach((mk) => {
-      if (!mk || !mk.month || mk.value === null) return;
-      const x = sc.x(mk.month), yy = y(mk.value);
-      svg.appendChild(svgEl('circle', { cx: x, cy: yy, r: 4.5 }, { fill: mk.color, stroke: 'var(--panel)', 'stroke-width': '2' }));
-      svg.appendChild(txt(x + (mk.side === 'left' ? -9 : 9), yy + 4, mk.label, { class: 'ink', 'text-anchor': mk.side === 'left' ? 'end' : 'start' }));
-    });
-    // crosshair + tooltip
-    const wrap = el('div', { class: 'chartwrap' }, [svg]);
-    const tip = el('div', { class: 'tip' });
-    wrap.appendChild(tip);
-    const cross = svgEl('line', { x1: 0, x2: 0, y1: T, y2: H - B }, { stroke: 'var(--muted)', 'stroke-width': '1', visibility: 'hidden' });
-    svg.appendChild(cross);
-    const hit = svgEl('rect', { x: L, y: T, width: W - L - R, height: H - T - B }, { fill: 'transparent' });
-    svg.appendChild(hit);
-    const move = (evt) => {
-      const box = svg.getBoundingClientRect();
-      const vx = (evt.clientX - box.left) / box.width * W;
-      const i = Math.min(Math.max(Math.floor((vx - L) / sc.step), 0), months.length - 1);
-      const x = sc.x(months[i]);
-      cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.style.visibility = 'visible';
-      tip.textContent = '';
-      tip.appendChild(el('b', { text: monthLabel(months[i]) }));
-      series.forEach((s) => tip.appendChild(el('div', {}, [el('span', { class: 'dot', style: 'background:' + s.color + ';margin-right:6px' }), s.label + ': ' + (s.mv[i] === null ? '—' : fmtMln(s.mv[i]))])));
-      tip.style.display = 'block';
-      const px = x / W * box.width;
-      tip.style.left = Math.min(px + 12, box.width - tip.offsetWidth - 4) + 'px';
-      tip.style.top = '4px';
-    };
-    hit.addEventListener('mousemove', move);
-    hit.addEventListener('mouseleave', () => { tip.style.display = 'none'; cross.style.visibility = 'hidden'; });
-    return wrap;
-  }
-
-  function seriesKey(items) {
-    return el('div', { class: 'key' }, items.map((it) => el('span', {}, [el('span', { class: 'dot', style: 'background:' + it.color }), ' ' + it.label])));
-  }
-
-  function cashChart(v, d) {
-    const at = d.cash.activeTrough, vt = d.cash.variantTrough;
-    const sameMonth = at && vt && at.month === vt.month;
-    const chart = lineChart({
-      months: d.axis.months, closedThrough: d.axis.closedThrough, aria: 'Накопленный чистый денежный поток, активный прогноз и ' + v.id,
-      series: [
-        { label: 'активный', color: 'var(--active)', values: d.cash.active, endLabel: false },
-        { label: v.id, color: colorOf(v.id), values: d.cash.variant, endLabel: false }
-      ],
-      markers: [
-        at ? { month: at.month, value: mln(at.minor), color: 'var(--active)', label: 'дно ' + fmtMln(mln(at.minor)) + ', ' + monthLabel(at.month), side: 'left' } : null,
-        vt && !sameMonth ? { month: vt.month, value: mln(vt.minor), color: colorOf(v.id), label: 'дно ' + fmtMln(mln(vt.minor)) + ', ' + monthLabel(vt.month), side: 'right' } : null
-      ]
-    });
-    return el('div', {}, [seriesKey([{ label: 'активный прогноз', color: 'var(--active)' }, { label: v.id, color: colorOf(v.id) }]), el('div', { class: 'scrollx' }, [chart])]);
-  }
-
-  function fundingCharts(v, d) {
-    const grid = el('div', { class: 'smalls' });
-    d.funding.forEach((f) => {
-      const chart = lineChart({
-        months: d.axis.months, closedThrough: d.axis.closedThrough, width: 420, height: 190, left: 52, right: 40,
-        aria: 'Остаток долга: ' + f.name,
-        series: [
-          { label: 'активный', color: 'var(--active)', values: f.active, endLabel: false },
-          { label: v.id, color: colorOf(v.id), values: f.variant, endLabel: false }
-        ]
-      });
-      const lastOf = (arr) => { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] !== null) return arr[i]; return null; };
-      const peak = (arr) => arr.reduce((m, x) => x === null ? m : Math.max(m, mln(x)), 0);
-      grid.appendChild(el('div', {}, [
-        el('h6', { text: f.name + (f.group === 'bank' ? ' · банк' : f.group === 'partner' ? ' · партнёр' : '') }),
-        el('div', { class: 'sub', text: 'пик ' + fmtMln(peak(f.variant)) + ' (было ' + fmtMln(peak(f.active)) + ')' + (lastOf(f.variant) !== null && mln(lastOf(f.variant)) > 0.05 ? ' · на выходе ' + fmtMln(mln(lastOf(f.variant))) : '') }),
-        chart
-      ]));
-    });
-    return el('div', {}, [seriesKey([{ label: 'активный прогноз', color: 'var(--active)' }, { label: v.id, color: colorOf(v.id) }]), grid]);
-  }
-
-  function bridgeChart(v, d) {
-    const rows = d.bridge.filter((r) => r.minor !== '0').map((r) => ({ label: r.label, value: mln(r.minor) }));
-    const an = mln(d.profit.activeNetMinor), vn = mln(d.profit.variantNetMinor);
-    const head = el('div', { class: 'sub', text: 'Чистая прибыль: ' + fmtMln(an) + ' → ' + fmtMln(vn) + ' (' + fmtDeltaMln(vn - an) + ')' });
-    if (rows.length === 0) return el('div', {}, [head, el('div', { class: 'muted', text: 'Строки плана не меняют чистую прибыль.' })]);
-    const W = 760, L = 150, R = 110, rowH = 30, T = 6, H = T + rows.length * rowH + 6;
-    const lo = Math.min(0, Math.min.apply(null, rows.map((r) => r.value))), hi = Math.max(0, Math.max.apply(null, rows.map((r) => r.value)));
-    const x = (val) => L + (val - lo) / (hi - lo || 1) * (W - L - R);
-    const svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'vchart', role: 'img', 'aria-label': 'Изменение чистой прибыли по группам строк' });
-    svg.appendChild(svgEl('line', { x1: x(0), x2: x(0), y1: 0, y2: H }, { stroke: 'var(--axis)', 'stroke-width': '1' }));
-    rows.forEach((r, i) => {
-      const yy = T + i * rowH;
-      svg.appendChild(txt(L - 10, yy + 19, r.label, { class: 'lbl', 'text-anchor': 'end' }));
-      const x0 = Math.min(x(0), x(r.value)), w = Math.max(Math.abs(x(r.value) - x(0)), 2);
-      const bar = svgEl('rect', { x: x0, y: yy + 7, width: w, height: 16, rx: 3 }, { fill: r.value < 0 ? 'var(--bad-mark)' : 'var(--good-mark)' });
-      const t = svgEl('title', {}); t.textContent = r.label + ': ' + fmtDeltaMln(r.value); bar.appendChild(t);
-      svg.appendChild(bar);
-      svg.appendChild(txt(r.value < 0 ? x(0) + 6 : x0 + w + 6, yy + 19, fmtDeltaMln(r.value), { class: 'ink' }));
-    });
-    const ae = mln(d.profit.activeExitMinor), ve = mln(d.profit.variantExitMinor);
-    const exit = ae !== null && ve !== null ? el('div', { class: 'sub', text: 'Прибыль на выходе для партнёров (после процентов модели источников): ' + fmtMln(ae) + ' → ' + fmtMln(ve) + ' (' + fmtDeltaMln(ve - ae) + ')' }) : null;
-    return el('div', {}, [head, el('div', { class: 'chartwrap', style: 'max-width: 760px' }, [svg]), exit]);
-  }
-
   function variantPanel(v, ctx) {
     const t = (ctx.explanation.variants || []).find((x) => x.id === v.id) || null;
     const d = v.diff;
@@ -809,11 +525,6 @@ svg text { font-size: 11px; }
       panel.appendChild(el('div', { class: 'muted', text: 'Диффа против активного прогноза нет: прогон сделан до этапа 4.' }));
       return panel;
     }
-    panel.appendChild(kpiTiles(v, d, ctx));
-    panel.appendChild(section('Сроки: что сдвигается', 'Серая полоса: активный прогноз, цветная: ' + v.id + '. Сдвиги прочитаны из ячеек плана; вехи версии evaluate не пересчитывает.', timeline(v, d, ctx.milestones)));
-    panel.appendChild(section('Деньги проекта', 'Накопленный чистый поток с начала проекта, млн ' + money.code + '. Дно: момент наибольшей потребности в деньгах.', cashChart(v, d)));
-    panel.appendChild(section('План финансирования', 'Остаток основного долга по источникам на конец месяца, млн ' + money.code + '.', fundingCharts(v, d)));
-    panel.appendChild(section('Откуда разница в прибыли', 'Изменение по группам строк плана против активного прогноза, млн ' + money.code + '.', bridgeChart(v, d)));
     if (d.notes.length) panel.appendChild(el('div', { class: 'notes' }, [el('div', { class: 'eyebrow', text: 'Что расчёт не видит (по данным Kairon)' }), el('ul', {}, d.notes.map((n) => el('li', { text: n })))]));
     return panel;
   }
@@ -829,7 +540,7 @@ svg text { font-size: 11px; }
     ]));
     const ranked = s.ranking.map((id) => s.variants.find((v) => v.id === id)).filter((v) => v && v.status === 'ok');
     const reco = e.recommendation || e.topRanked || (ranked[0] ? ranked[0].id : '');
-    const ctx = { promise: s.approved, active: s.active, v1: ranked.find((v) => v.id === 'v1') || null, reco: reco, explanation: e, milestones: b.milestones };
+    const ctx = { promise: s.approved, active: s.active, v1: ranked.find((v) => v.id === 'v1') || null, reco: reco, explanation: e };
     const report = el('section', { class: 'report' });
     const recoV = ranked.find((v) => v.id === reco);
     report.appendChild(el('div', {}, [
@@ -1165,21 +876,23 @@ svg text { font-size: 11px; }
   const NO_SAMPLE_ANSWER = 'В образце нет ответа на эту фразу, выберите модель с ключом';
   const session = { sections: [], selected: null, record: [] };
   let R = null;
-  let WIDGETS = null;
+  let WIDGETS = { bundle: null, cause: 'no-bundle', problem: 'сборка виджетов ещё не загружена' };
   let demoPhrases = [];
   const renderReady = import(API + '/kairon/assets/kairon-render.mjs').then((m) => {
     R = m;
     document.head.appendChild(el('style', { text: m.CARD_CSS }));
   });
-  // The forecast widgets bundle (DEV-1380): present only when the service runs with KAIRON_WIDGETS_DIST.
-  // WIDGETS stays null without it, and every catalog widget then falls back to the page's own renderer.
-  // A bundle of another build than the service states is dropped too (R.acceptBundle).
-  const widgetsReady = Promise.all([renderReady, fetch(API + '/kairon/widgets').then((r) => r.json())])
-    .then(([, info]) => info.bundle
-      ? import(API + info.bundle + '?build=' + encodeURIComponent(info.buildId || '')).then((m) => R.acceptBundle(m, info))
-      : null)
-    .then((m) => { WIDGETS = m; })
-    .catch(() => { WIDGETS = null; });
+  // The forecast widgets bundle (DEV-1380, DEV-1381): it draws every figure of a draft. WIDGETS is
+  // R.bundleState: the bundle, or why the page has none (no KAIRON_WIDGETS_DIST, a failed import, a
+  // bundle of another build than the service states); a figure then shows as one line with that cause.
+  const widgetsReady = renderReady
+    .then(() => fetch(API + '/kairon/widgets').then((r) => r.json()))
+    .then((info) => info.bundle
+      ? import(API + info.bundle + '?build=' + encodeURIComponent(info.buildId || ''))
+          .then((m) => R.bundleState(info, m), (err) => R.bundleState(info, null, String(err)))
+      : R.bundleState(info, null))
+    .then((state) => { WIDGETS = state; })
+    .catch((err) => { WIDGETS = { bundle: null, cause: 'no-bundle', problem: 'сервис не ответил на /kairon/widgets: ' + String(err) }; });
   fetch(API + '/kairon/demo-phrases').then((r) => r.json()).then((j) => {
     demoPhrases = j.phrases;
     const box = $('demo');
@@ -1448,13 +1161,17 @@ svg text { font-size: 11px; }
     card.appendChild(widgetBox('Сверки', 'черновик сходится сам с собой и с Kairon', R.renderReconciliations(v.reconciliations)));
     if (v.diffView) card.appendChild(widgetBox('Что меняется против родителя', 'копия diff-вида Kairon', R.renderDiffView(v.diffView, cur)));
     const specs = ((out.widgets || {}).widgets || {})[v.id] || [];
-    if (v.widgetInputs) specs.forEach((spec) => card.appendChild(htmlBlock('', R.renderWidget(spec, v, v.widgetInputs.parent, v.widgetInputs.draft, cur))));
+    specs.forEach((spec) => { const html = R.renderWidget(spec, v); if (html) card.appendChild(htmlBlock('', html)); });
     if (v.widgetErrors && v.widgetErrors.length) card.appendChild(el('div', { class: 'warnbox', text: 'Виджеты каталога без данных: ' + v.widgetErrors.join('; ') }));
-    // The catalog widgets the server assembled for the draft (DEV-1381), in the server's order, after the
-    // declarative ones. The page names no widget id; an instance the bundle does not draw is skipped.
-    R.mountInstances(WIDGETS, R.instancesOf(out, v.id), () => el('div', { class: 'k-catalog' })).forEach((m) => {
-      card.appendChild(m.host);
-      if (ctx.unmounts) ctx.unmounts.push(m.unmount);
+    // The figures of the draft: the catalog widgets the server assembled (DEV-1381), in the server's order.
+    // The page names no widget id and has no renderer of its own for them; where the bundle cannot draw
+    // one, a line names the cause.
+    const noCatalog = R.runFigureLine(out);
+    if (noCatalog) card.appendChild(el('div', { class: 'k-nofigure', text: noCatalog }));
+    R.placeInstances(WIDGETS, R.instancesOf(out, v.id), () => el('div', { class: 'k-catalog' })).forEach((p) => {
+      if (!p.host) { card.appendChild(el('div', { class: 'k-nofigure', 'data-cause': p.cause, text: p.line })); return; }
+      card.appendChild(p.host);
+      if (ctx.unmounts) ctx.unmounts.push(p.unmount);
     });
     card.appendChild(variantPanel(v, ctx));
     card.appendChild(saveRow(section, v));
@@ -1475,7 +1192,7 @@ svg text { font-size: 11px; }
     // '' when every scored draft misses the goal or adds a red-line breach: no tab is marked, the overview says why.
     const reco = e.recommendation;
     // unmounts: what the bundle mounted for the shown draft; a tab switch removes it before the card is replaced.
-    const ctx = { promise: s.approved, active: s.active, v1: ranked.find((v) => v.id === 'v1') || null, reco, explanation: e, milestones: b.milestones, unmounts: [] };
+    const ctx = { promise: s.approved, active: s.active, v1: ranked.find((v) => v.id === 'v1') || null, reco, explanation: e, unmounts: [] };
     const overview = widgetBox('Рекомендация и почему', 'ранжирование: сервер · текст: LLM с плейсхолдерами', R.renderOverview(e, s));
     result.appendChild(overview);
     if (e.unknownPlaceholders.length) result.appendChild(el('div', { class: 'warnbox', text: 'LLM сослалась на несуществующие факты: ' + e.unknownPlaceholders.join(', ') }));

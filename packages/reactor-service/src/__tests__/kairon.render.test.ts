@@ -10,7 +10,6 @@ import { forecastDiffView } from '../kairon/diffView.js';
 import { applyPatch, type ForecastPlan } from '../kairon/patch.js';
 import { redLines } from '../kairon/redLines.js';
 import { summarizeEvaluation } from '../kairon/summary.js';
-import { defaultWidgets, widgetInputs } from '../kairon/widgets.js';
 import { fixtureDoc, readStage5, RIVERGATE_PARTNERS } from './_helpers/kaironFake.js';
 
 interface RenderModule {
@@ -21,16 +20,22 @@ interface RenderModule {
   renderReconciliations(reconciliations: unknown): string;
   renderOverview(explanation: unknown, scored: unknown): string;
   renderRejected(rejected: unknown): string;
-  renderWidget(spec: unknown, scoredVariant: unknown, parentEval: unknown, draftEval: unknown): string;
+  renderWidget(spec: unknown, scoredVariant: unknown): string;
   renderDiffView(diffView: unknown, currency?: unknown): string;
   saveOutcome(status: number, json: unknown): { text: string; canRetry: boolean };
   renderRouteNote(route: unknown): string;
   answersOf(out: unknown): Array<{ parentId: string; text: string }>;
   sessionExport(session: unknown, meta: unknown): unknown;
   instancesOf(out: unknown, variantId: string): unknown[];
-  mountInstances(bundle: unknown, instances: unknown[], hostOf: (instance: unknown) => unknown): Array<{ host: unknown; unmount: () => void }>;
-  mountInstance(host: unknown, bundle: unknown, instance: unknown): (() => void) | null;
-  acceptBundle(module: unknown, info: unknown): unknown;
+  bundleState(info: unknown, module: unknown, error?: string): { bundle: unknown; cause: string | null; problem: string | null };
+  instanceProblem(state: unknown, instance: unknown): { cause: string; text: string } | null;
+  figureLine(instance: unknown, problem: { text: string }): string;
+  placeInstances(
+    state: unknown,
+    instances: unknown[],
+    hostOf: (instance: unknown) => unknown,
+  ): Array<{ instance: unknown; host?: unknown; unmount?: () => void; cause?: string; line?: string }>;
+  runFigureLine(out: unknown): string | null;
 }
 
 const MODULE = pathToFileURL(fileURLToPath(new URL('../../web/kairon-render.mjs', import.meta.url))).href;
@@ -225,7 +230,6 @@ describe('kairon render: recommendation overview', () => {
 });
 
 describe('kairon render: widgets', () => {
-  const [matrixSpec, barsSpec] = defaultWidgets([{ path: 'funding.draws', cells: 14 }]);
   const windowMonths = ['2026-09', '2026-10', '2026-11', '2026-12', '2027-01', '2027-02'];
   const coverDraft = {
     id: 'v1.1',
@@ -240,55 +244,28 @@ describe('kairon render: widgets', () => {
       },
     ],
   };
-  // The page passes the scored variant's widgetInputs, the trimmed evaluations (Task 19).
-  const parentEval = widgetInputs(readStage5('eval-active.json'));
-  const draftEval = widgetInputs(readStage5('cover-cedar.eval.json'));
-  const rowOf = (html: string, name: string) => {
-    const start = html.indexOf(`<tr><td>${name}</td>`);
-    return start === -1 ? '' : html.slice(start, html.indexOf('</tr>', start) + 5);
-  };
 
-  it('shows the w1 matrix with the window delta and the row total, draft minus parent', () => {
-    // SCENARIO: the Cedar cover draft; the funding rule pays Solstice's share back in 2027-03 and 2027-04
-    // INPUT: matrix-diff spec; eval-active as the parent, cover-cedar.eval as the draft; the goal window 2026-09..2027-02
-    // EXPECTED: columns 2026-09..2027-04; Cedar Δ in the window +33,1 and Σ Δ ±0,0; Solstice −33,1 and ±0,0; changed cells carry the delta
-    const html = render.renderWidget(matrixSpec, coverDraft, parentEval, draftEval);
-    expect(html.split('<th class="m">').length - 1).toBe(8);
-    expect(rowOf(html, 'Cedar Partners loan')).toContain('<td class="sum"><b>+33,1</b></td><td class="sum">±0,0</td></tr>');
-    expect(rowOf(html, 'Solstice Sponsor loan')).toContain('<td class="sum"><b>−33,1</b></td><td class="sum">±0,0</td></tr>');
-    expect(rowOf(html, 'Cedar Partners loan')).toContain('<td class="chg"><b>8,2</b><small>+2,7</small></td>');
+  it('draws the goal check, the one widget the page draws itself (DEV-1381)', () => {
+    // SCENARIO: the widgets step named condition-check for the cover draft
+    // INPUT: the spec { condition-check, «Цель» }, the draft with one goal check
+    // EXPECTED: a widget box with the title, the tag «b1 · цели» and the goal's label
+    const html = render.renderWidget({ widget: 'condition-check', title: 'Цель', goals: 'active' }, coverDraft);
+    expect([
+      html.includes('<div class="k-wh"><b>Цель</b><span class="k-tag">b1 · цели</span></div>'),
+      html.includes('Cedar Partners покрывает всю потребность 6 мес. с 2026-09'),
+    ]).toEqual([true, true]);
   });
 
-  it('draws one before/after pair per month and labels the delta of the goal partner', () => {
-    // SCENARIO: the w2 bars for the same draft
-    // INPUT: bars-before-after spec
-    // EXPECTED: 8 month pairs; the legend names the Cedar source as the labelled delta
-    const html = render.renderWidget(barsSpec, coverDraft, parentEval, draftEval);
-    expect(html.split('<g class="k-pair"').length - 1).toBe(8);
-    expect(html).toContain('подпись: Δ Cedar Partners loan, млн');
-  });
-
-  it('keeps 52 units per month when 22 months changed, so labels never overlap', () => {
-    // SCENARIO: a price lever moves the funding rule's tranches in 22 months (stage 5 demo phrase 5)
-    // INPUT: one source, parent 10,0 млн and draft 10,2 млн in every month 2026-09..2028-06
-    // EXPECTED: 22 pairs; viewBox width 30 + 22 × 52 + 4 = 1178; the SVG is drawn 1767 px wide and scrolls in its card
-    const months = Array.from({ length: 22 }, (_, i) => `${2026 + Math.floor((8 + i) / 12)}-${String(((8 + i) % 12) + 1).padStart(2, '0')}`);
-    const inputs = (amountMinor: string) => ({
-      draws: months.map((m) => ({ sourceId: 'cedar', period: `${m}-01`, amountMinor })),
-      walk: { sources: [{ id: 'cedar', name: 'Cedar Partners loan' }], cashNeedMinor: '0' },
-      sourceGroups: [],
-    });
-    const html = render.renderWidget(barsSpec, { id: 'v1.1', goalChecks: [] }, inputs('1000000000'), inputs('1020000000'));
-    expect(html.split('<g class="k-pair"').length - 1).toBe(22);
-    expect(html).toContain('<svg viewBox="0 0 1178 190" width="1767" height="285" role="img"');
-  });
-
-  it('draws the 8 cover months at 52 units each, 675 px wide', () => {
-    // SCENARIO: the Cedar cover draft from the test above, 8 changed months
-    // INPUT: bars-before-after spec, eval-active and cover-cedar.eval
-    // EXPECTED: viewBox width 30 + 8 × 52 + 4 = 450, drawn 675 × 285 px
-    const html = render.renderWidget(barsSpec, coverDraft, parentEval, draftEval);
-    expect(html).toContain('<svg viewBox="0 0 450 190" width="675" height="285" role="img"');
+  it('draws nothing for a declarative widget the catalog replaced', () => {
+    // SCENARIO: a session recorded before DEV-1381 carries matrix-diff, bars-before-after and stakeholder-table specs
+    // INPUT: one spec of each
+    // EXPECTED: an empty string for each: the figures are catalog widgets now
+    const specs = [
+      { widget: 'matrix-diff', title: 'Транши' },
+      { widget: 'bars-before-after', title: 'Было и стало' },
+      { widget: 'stakeholder-table', title: 'Стороны', rows: ['Cedar Partners'] },
+    ];
+    expect(specs.map((spec) => render.renderWidget(spec, coverDraft))).toEqual(['', '', '']);
   });
 });
 
@@ -545,119 +522,144 @@ describe('catalog widgets on the page (DEV-1380)', () => {
     expect([render.instancesOf({ widgets: { widgets: { v1: [] } } }, 'v1'), render.instancesOf({}, 'v1')]).toEqual([[], []]);
   });
 
+  const loaded = () => {
+    const bundle = fakeBundle();
+    return { bundle, state: render.bundleState({ bundle: '/x', buildId: 'b1' }, bundle) };
+  };
+
+  it('states why the page has no bundle', () => {
+    // SCENARIO: a figure the bundle cannot draw gets one line naming the cause; the first cause is the bundle itself
+    // INPUT: (a) the service names no bundle; (b) the import failed; (c) the bundle is of another build than the
+    //        service states; (d) the bundle of the stated build
+    // EXPECTED: (a), (b) no-bundle with the reason; (c) stale-build naming both builds; (d) the bundle and no problem
+    const bundle = fakeBundle();
+    expect([
+      render.bundleState({ bundle: null, buildId: null }, null),
+      render.bundleState({ bundle: '/x', buildId: 'b1' }, null, 'SyntaxError: Unexpected token'),
+      render.bundleState({ bundle: '/x', buildId: 'b2' }, bundle),
+      render.bundleState({ bundle: '/x', buildId: 'b1' }, bundle).bundle === bundle,
+      render.bundleState({ bundle: '/x', buildId: 'b1' }, bundle).problem,
+    ]).toEqual([
+      { bundle: null, cause: 'no-bundle', problem: 'сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась)' },
+      { bundle: null, cause: 'no-bundle', problem: 'бандл виджетов не загрузился: SyntaxError: Unexpected token' },
+      { bundle: null, cause: 'stale-build', problem: 'сервис называет сборку b2, загруженный бандл собран как b1' },
+      true,
+      null,
+    ]);
+  });
+
+  it('names the cause an instance cannot be drawn for', () => {
+    // SCENARIO: no bundle, a stale build, a version the bundle lacks, data that breaks the schema (DEV-1381)
+    // INPUT: the cash instance against: no bundle; the bundle b1 with the instance stamped b0, and unstamped; the
+    //        instance at version 2; an instance of a widget the bundle lacks; data the bundle refuses; the instance as is
+    // EXPECTED: the four causes with their texts; null for the instance the bundle draws
+    const { state } = loaded();
+    const { buildId: _stamp, ...unstamped } = cash;
+    expect([
+      render.instanceProblem(render.bundleState({ bundle: null, buildId: null }, null), cash),
+      render.instanceProblem(state, { ...cash, buildId: 'b0' }),
+      render.instanceProblem(state, unstamped),
+      render.instanceProblem(state, { ...cash, version: 2 }),
+      render.instanceProblem(state, { ...cash, widget: 'nope' }),
+      render.instanceProblem(state, { ...cash, data: { broken: true } }),
+      render.instanceProblem(state, cash),
+    ]).toEqual([
+      { cause: 'no-bundle', text: 'сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась)' },
+      { cause: 'stale-build', text: 'данные собраны сборкой b0, страница загрузила сборку b1' },
+      { cause: 'stale-build', text: 'данные собраны без отметки сборки, страница загрузила сборку b1' },
+      { cause: 'version', text: 'в данных версия виджета 2, в загруженной сборке 1' },
+      { cause: 'version', text: 'в загруженной сборке нет виджета nope' },
+      { cause: 'data', text: 'данные не проходят схему виджета' },
+      null,
+    ]);
+  });
+
+  it('writes the line shown in place of a figure', () => {
+    // SCENARIO: the page shows one line where the figure would be
+    // INPUT: the cash instance titled «Деньги» and a version problem; an instance with no title
+    // EXPECTED: the title in quotes, then the cause; the widget id stands in for a missing title
+    const problem = { cause: 'version', text: 'в данных версия виджета 2, в загруженной сборке 1' };
+    expect([render.figureLine(cash, problem), render.figureLine({ widget: 'cash-line', spec: {} }, problem)]).toEqual([
+      '«Деньги»: фигура не нарисована, в данных версия виджета 2, в загруженной сборке 1.',
+      '«cash-line»: фигура не нарисована, в данных версия виджета 2, в загруженной сборке 1.',
+    ]);
+  });
+
   it('mounts every instance the bundle draws, each in its own host, in the server\'s order', () => {
     // SCENARIO: the server assembled three instances; the bundle's manifest carries all three widgets (DEV-1381)
     // INPUT: instances kpi-tiles, need-rows, cash-line; a host made per instance
-    // EXPECTED: three mounts in that order, each with its own host; the hosts come back with their unmounts
-    const bundle = fakeBundle();
-    const mounted = render.mountInstances(bundle, [kpi, need, cash], (instance) => ({ hostOf: (instance as { widget: string }).widget }));
-    mounted.forEach((m) => m.unmount());
-    expect([bundle.calls.map((call) => [call[0], call[1]]), mounted.map((m) => m.host), bundle.unmounted()]).toEqual([
+    // EXPECTED: three mounts in that order, each with its own host and in Russian; the hosts come back with their unmounts
+    const { bundle, state } = loaded();
+    const placed = render.placeInstances(state, [kpi, need, cash], (instance) => ({ hostOf: (instance as { widget: string }).widget }));
+    placed.forEach((p) => p.unmount?.());
+    expect([bundle.calls, placed.map((p) => [p.host, p.line]), bundle.unmounted()]).toEqual([
       [
-        [{ hostOf: 'kpi-tiles' }, kpi],
-        [{ hostOf: 'need-rows' }, need],
-        [{ hostOf: 'cash-line' }, cash],
+        [{ hostOf: 'kpi-tiles' }, kpi, { locale: 'ru' }],
+        [{ hostOf: 'need-rows' }, need, { locale: 'ru' }],
+        [{ hostOf: 'cash-line' }, cash, { locale: 'ru' }],
       ],
-      [{ hostOf: 'kpi-tiles' }, { hostOf: 'need-rows' }, { hostOf: 'cash-line' }],
+      [
+        [{ hostOf: 'kpi-tiles' }, undefined],
+        [{ hostOf: 'need-rows' }, undefined],
+        [{ hostOf: 'cash-line' }, undefined],
+      ],
       3,
     ]);
   });
 
-  it('skips an instance the bundle does not draw and mounts the rest', () => {
-    // SCENARIO: one instance is of a version the bundle lacks, one of a widget its manifest does not carry
-    // INPUT: kpi-tiles, cash-line at version 2, an instance of widget nope; the bundle b1
-    // EXPECTED: kpi-tiles alone is mounted; no host is made for the other two; with no bundle nothing is mounted
-    const bundle = fakeBundle();
+  it('puts a line in place of each instance it cannot draw and mounts the rest', () => {
+    // SCENARIO: one instance is of a version the bundle lacks, one has broken data; the figures are the bundle's alone
+    // INPUT: kpi-tiles, cash-line at version 2, need-rows with broken data; the bundle b1
+    // EXPECTED: kpi-tiles mounted; a line with the cause for the other two, in the server's order; no host made for them
+    const { state } = loaded();
     const hosts: string[] = [];
     const hostOf = (instance: unknown) => {
       hosts.push((instance as { widget: string }).widget);
       return { hostOf: (instance as { widget: string }).widget };
     };
-    const list = [kpi, { ...cash, version: 2 }, { ...cash, widget: 'nope' }];
-    expect([render.mountInstances(bundle, list, hostOf).map((m) => m.host), hosts, render.mountInstances(null, list, hostOf)]).toEqual([
-      [{ hostOf: 'kpi-tiles' }],
+    const placed = render.placeInstances(state, [kpi, { ...cash, version: 2 }, { ...need, data: { broken: true } }], hostOf);
+    expect([placed.map((p) => [p.host, p.cause, p.line]), hosts]).toEqual([
+      [
+        [{ hostOf: 'kpi-tiles' }, undefined, undefined],
+        [undefined, 'version', '«Деньги»: фигура не нарисована, в данных версия виджета 2, в загруженной сборке 1.'],
+        [undefined, 'data', '«Потребность»: фигура не нарисована, данные не проходят схему виджета.'],
+      ],
       ['kpi-tiles'],
-      [],
     ]);
   });
 
-  it('mounts an instance with the bundle, in Russian, and hands back the unmount', () => {
-    // SCENARIO: the bundle is loaded and the draft has a cash-line instance
-    // INPUT: a host, the bundle, the instance
-    // EXPECTED: one mount(host, instance, { locale: 'ru' }) call; the returned function unmounts once
-    const bundle = fakeBundle();
-    const unmount = render.mountInstance(host, bundle, cash);
-    unmount?.();
-    expect([bundle.calls, bundle.unmounted()]).toEqual([[[host, cash, { locale: 'ru' }]], 1]);
+  it('puts a line for every instance when the page has no bundle', () => {
+    // SCENARIO: the service runs with no KAIRON_WIDGETS_DIST and replays a run recorded with a catalog
+    // INPUT: two instances, no bundle
+    // EXPECTED: two lines naming the missing bundle; no mount
+    const state = render.bundleState({ bundle: null, buildId: null }, null);
+    expect(render.placeInstances(state, [kpi, cash], () => ({})).map((p) => p.line)).toEqual([
+      '«Показатели»: фигура не нарисована, сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась).',
+      '«Деньги»: фигура не нарисована, сервис запущен без сборки виджетов (KAIRON_WIDGETS_DIST не задан или сборка не загрузилась).',
+    ]);
   });
 
-  it('mounts nothing without the bundle or without an instance', () => {
-    // SCENARIO: no KAIRON_WIDGETS_DIST (the bundle is null), or a draft the widget was not cut for
-    // INPUT: (a) no bundle, an instance; (b) the bundle, no instance
-    // EXPECTED: null for both, and no mount call: the page falls back to its own renderer
-    const bundle = fakeBundle();
-    expect([render.mountInstance(host, null, cash), render.mountInstance(host, bundle, undefined), bundle.calls]).toEqual([null, null, []]);
-  });
-
-  it('falls back when the bundle fails to mount', () => {
+  it('puts a line when the bundle fails while mounting', () => {
     // SCENARIO: a bundle that throws must not take the draft card down
-    // INPUT: a bundle whose mount throws
-    // EXPECTED: null
-    const broken = {
+    // INPUT: a bundle whose mount throws «boom»
+    // EXPECTED: one line naming the failure
+    const bundle = {
       ...fakeBundle(),
       mount: () => {
         throw new Error('boom');
       },
     };
-    expect(render.mountInstance(host, broken, cash)).toBeNull();
+    const state = render.bundleState({ bundle: '/x', buildId: 'b1' }, bundle);
+    expect(render.placeInstances(state, [cash], () => ({})).map((p) => [p.cause, p.line])).toEqual([['mount', '«Деньги»: фигура не нарисована, виджет не нарисовался: boom.']]);
   });
 
-  it('refuses an instance assembled by another build, or by none', () => {
-    // SCENARIO: a session recorded on one widgets build replays on a page that loaded a rebuilt bundle (review I1)
-    // INPUT: the bundle of build b1; the cash instance stamped b0; the cash instance with no stamp
-    // EXPECTED: null for both and no mount call, so the page's own renderer draws
-    const bundle = fakeBundle();
-    const { buildId: _stamp, ...unstamped } = cash;
-    expect([render.mountInstance(host, bundle, { ...cash, buildId: 'b0' }), render.mountInstance(host, bundle, unstamped), bundle.calls]).toEqual([null, null, []]);
-  });
-
-  it('refuses an instance whose version the bundle does not carry', () => {
-    // SCENARIO: the instance states a widget version the loaded bundle does not draw (review I2, scenario E)
-    // INPUT: the bundle with cash-line at version 1; the cash instance at version 2; an instance of a widget the bundle lacks
-    // EXPECTED: null for both and no mount call: the figure stays on the page through its own renderer
-    const bundle = fakeBundle();
-    expect([
-      render.mountInstance(host, bundle, { ...cash, version: 2 }),
-      render.mountInstance(host, bundle, { ...cash, widget: 'nope' }),
-      bundle.calls,
-    ]).toEqual([null, null, []]);
-  });
-
-  it('refuses an instance whose data breaks the widget schema', () => {
-    // SCENARIO: the instance data does not parse in the loaded bundle (review I2, scenario F)
-    // INPUT: the cash instance with data the bundle's parseData throws on
-    // EXPECTED: null and no mount call
-    const bundle = fakeBundle();
-    expect([render.mountInstance(host, bundle, { ...cash, data: { broken: true } }), bundle.calls]).toEqual([null, []]);
-  });
-
-  it('refuses every instance when the bundle has no catalog to check against', () => {
-    // SCENARIO: a bundle that exports mount alone cannot state its build, versions or data schema
-    // INPUT: a bundle with mount and no buildId or catalog
-    // EXPECTED: null
-    expect(render.mountInstance(host, { mount: () => () => {} }, cash)).toBeNull();
-  });
-
-  it('accepts the bundle of the build the service states and no other', () => {
-    // SCENARIO: the page imported browser.mjs; the service's GET /kairon/widgets stated a build id (review I1)
-    // INPUT: (a) the bundle b1 with info b1; (b) the bundle b1 with info b2; (c) a module with no mount; (d) no module
-    // EXPECTED: (a) the bundle itself; (b), (c), (d) null, so WIDGETS stays null and the page's renderers draw
-    const bundle = fakeBundle();
-    expect([
-      render.acceptBundle(bundle, { bundle: '/x', buildId: 'b1' }) === bundle,
-      render.acceptBundle(bundle, { bundle: '/x', buildId: 'b2' }),
-      render.acceptBundle({ buildId: 'b1' }, { bundle: '/x', buildId: 'b1' }),
-      render.acceptBundle(null, { bundle: null, buildId: null }),
-    ]).toEqual([true, null, null, null]);
+  it('says once per run that it was made with no catalog', () => {
+    // SCENARIO: a run made with no widgets catalog has no instances at all, so its drafts show no figure
+    // INPUT: (a) a run whose widgets step returned specs alone; (b) a run with instances for v1
+    // EXPECTED: (a) the line; (b) null
+    expect([render.runFigureLine({ widgets: { widgets: { v1: [] } } }), render.runFigureLine({ widgets: { widgets: {}, instances: { v1: [] } } })]).toEqual([
+      'Фигуры не нарисованы: прогон сделан без каталога виджетов (сервис работал без KAIRON_WIDGETS_DIST).',
+      null,
+    ]);
   });
 });
