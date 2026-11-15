@@ -131,5 +131,38 @@ describe('POST /kairon/run', () => {
     const first = JSON.parse(res.body.split('\n')[0] ?? '{}') as { payload: { request: { providerConfig: unknown } } };
     expect(first.payload.request.providerConfig).toEqual({ provider: 'sample', model: SAMPLE_MODEL, apiKey: 'не нужен' });
   });
-});
 
+  it('writes a run with widget data once: byte counts in the steps, the instances in run.done (DEV-1381)', async () => {
+    // SCENARIO: a run with a widgets catalog; a recording must not repeat the widget data in every event
+    // INPUT: a reactor that emits tool.end of kairon.scoreVariants with widget data for v1, then returns a
+    //        solution whose output holds the scored state and one instance
+    // EXPECTED: tool.end carries widgetDataBytes and no widgetData; run.done carries the instance in full and
+    //           widgetDataBytes in output.scored
+    const data = { points: [{ month: '2026-09', amountMinor: '-1' }] };
+    const instance = { widget: 'cash-line', version: 1, buildId: 'b1', spec: { widget: 'cash-line', title: 'Деньги' }, data, provenance: 'kairon' };
+    const scored = { variants: [{ id: 'v1', widgetData: { 'cash-line': data } }] };
+    const server = Fastify({ logger: false });
+    registerKaironRunRoute(server, {
+      defaultApiKey: () => undefined,
+      createLLM: () => ({ name: 'none', complete: async () => ({ content: '', model: 'none' }) }) as LLMProvider,
+      buildReactor: () =>
+        ({
+          execute: async (_idea: unknown, options: { onProgress?: (event: { type: string; payload: unknown }) => void }) => {
+            options.onProgress?.({ type: 'tool.end', payload: { tool: 'kairon.scoreVariants', ms: 1, output: scored } });
+            return { calls: [], output: { scored, widgets: { widgets: { v1: [] }, instances: { v1: [instance] } } } };
+          },
+        }) as unknown as Reactor,
+    });
+    const res = await server.inject({
+      method: 'POST',
+      url: '/kairon/run',
+      payload: { idea: { schema: {}, context: [], solution: null }, providerConfig: { model: SAMPLE_MODEL } },
+    });
+    const events = res.body.trim().split('\n').map((l) => JSON.parse(l) as { type: string; payload: Record<string, unknown> });
+    const slimScored = { variants: [{ id: 'v1', widgetDataBytes: { 'cash-line': Buffer.byteLength(JSON.stringify(data), 'utf8') } }] };
+    expect([events.find((e) => e.type === 'tool.end')?.payload, (events.find((e) => e.type === 'run.done')?.payload as { solution: unknown }).solution]).toEqual([
+      { tool: 'kairon.scoreVariants', ms: 1, output: slimScored },
+      { calls: [], output: { scored: slimScored, widgets: { widgets: { v1: [] }, instances: { v1: [instance] } } } },
+    ]);
+  });
+});

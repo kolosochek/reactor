@@ -85,3 +85,58 @@ export function traceKaironApi(api: KaironApi, emit: Emit | undefined, now: () =
     putFunding: (versionId, body) => api.putFunding(versionId, body),
   };
 }
+
+// ---------- recording size (DEV-1381) ----------
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** UTF-8 bytes of a value as compact JSON. */
+function bytesOf(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+}
+
+function instanceSummary(instance: unknown): unknown {
+  if (!isRecord(instance)) return instance;
+  return { widget: instance.widget, version: instance.version, buildId: instance.buildId, bytes: bytesOf(instance) };
+}
+
+/** A copy of `value` with widget data replaced by byte counts and, unless kept, instances by their ids and byte counts. */
+function slim(value: unknown, keepInstances: boolean): unknown {
+  if (Array.isArray(value)) return value.map((item) => slim(item, keepInstances));
+  if (!isRecord(value)) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'widgetData' && isRecord(child)) {
+      out.widgetDataBytes = Object.fromEntries(Object.entries(child).map(([id, data]) => [id, bytesOf(data)]));
+    } else if (key === 'instances' && isRecord(child) && 'widgets' in value) {
+      // The output of kairon.planWidgets: { widgets, instances }.
+      out.instances = keepInstances
+        ? child
+        : Object.fromEntries(Object.entries(child).map(([draft, list]) => [draft, Array.isArray(list) ? list.map(instanceSummary) : list]));
+    } else {
+      out[key] = slim(child, keepInstances);
+    }
+  }
+  return out;
+}
+
+/**
+ * The payload of a trace event as /kairon/run writes it. A run's state repeats in its events: the
+ * scoring's output is the argument of the two steps after it and sits in run.done again, so the
+ * widget data of a draft (about 90 KB with 14 widgets) was written six times and its instances
+ * twice. The trace keeps one copy of what the page draws: the instances, in the output of
+ * run.done. Widget data becomes `widgetDataBytes` (bytes per widget) everywhere, and the widgets
+ * step's own event lists each instance by widget, version, build id and bytes. Nothing reads
+ * widget data back from a recording: a follow-up request carries drafts' lineages, the save
+ * carries one lineage, and a replay draws from run.done. The payload itself is not changed; the
+ * run's state keeps the data the widgets step reads.
+ */
+export function slimTraceEvent(type: string, payload: unknown): unknown {
+  if (type === 'tool.start' || type === 'tool.end') return slim(payload, false);
+  if (type !== 'run.done' || !isRecord(payload) || !isRecord(payload.solution)) return payload;
+  const { output, ...rest } = payload.solution;
+  return { ...payload, solution: { ...(slim(rest, false) as Record<string, unknown>), output: slim(output, true) } };
+}
+

@@ -7,13 +7,15 @@
 //   NDJSON ({ t, type, payload } per line): run.start with the request (API
 //   key redacted), tool.start / tool.end, llm.request / llm.first_token /
 //   llm.delta / llm.done, kairon.call, then run.done with the solution or
-//   run.error. /reactor/execute stays unchanged.
+//   run.error. Widget data is left out of the events and the catalog instances
+//   are written once, in run.done (DEV-1381). /reactor/execute stays unchanged.
 
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Idea, LLMProvider, ProgressEvent, Reactor } from '@kolosochek/reactor-core';
 import { DEFAULT_MODEL, loadStructuredModels, type ModelInfo } from '../kairon/models.js';
 import { SAMPLE_MODEL } from '../kairon/sampleLlm.js';
+import { slimTraceEvent } from '../kairon/trace.js';
 
 const SAMPLE_ENTRY: ModelInfo = {
   id: SAMPLE_MODEL,
@@ -85,7 +87,8 @@ export function registerKaironRunRoute(app: FastifyInstance, deps: KaironRunDeps
     });
     const started = Date.now();
     const write = (type: string, payload: unknown) => {
-      if (!res.writableEnded) res.write(`${JSON.stringify({ t: Date.now() - started, type, payload })}\n`);
+      // Widget data is written once per run, not once per event that carries the run's state (slimTraceEvent).
+      if (!res.writableEnded) res.write(`${JSON.stringify({ t: Date.now() - started, type, payload: slimTraceEvent(type, payload) })}\n`);
     };
     const abort = new AbortController();
     res.on('close', () => {
