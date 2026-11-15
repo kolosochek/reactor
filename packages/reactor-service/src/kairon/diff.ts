@@ -8,12 +8,11 @@
 //
 // - bridge: net profit change split by plan line group; a residual row keeps
 //   the sum equal to the change Kairon reports.
-// - events and spans: when construction ends, the largest handover, the exit,
-//   and the months each line group runs. evaluate does not move milestones, so
-//   the shifts are read from the patched cells.
-// - cash and funding: cumulative net cash and each source's outstanding
-//   principal per month, on one month axis; a month outside a version's walk is
-//   null, never 0.
+// - events: when construction ends, the largest handover, the exit. evaluate
+//   does not move milestones, so the shifts are read from the patched cells.
+// - cash: the trough of the cumulative net cash and the month it is back at 0
+//   or above. The month series are not here: the catalog widgets draw them from
+//   widget data (DEV-1381).
 // - notes: what the evaluation cannot see (a typed tax line, typed interest).
 
 import { z } from 'zod';
@@ -35,12 +34,9 @@ const EvalShape = z.object({
     .nullable(),
   draws: z.array(z.object({ provenance: z.string() })).default([]),
   walk: z.object({
-    months: z.array(z.string()).min(1),
     cumulativeNetCashMinor: z.record(z.string()),
     interestTotalMinor: z.string(),
-    sources: z.array(z.object({ id: z.string(), name: z.string(), principalMinor: z.record(z.string()) })),
   }),
-  sourceGroups: z.array(z.object({ sourceId: z.string(), group: z.string() })).default([]),
 });
 
 type Evaluation = z.infer<typeof EvalShape>;
@@ -85,31 +81,21 @@ function bridgeKeyOf(code: string, groupCode: string | null | undefined): Bridge
   }
 }
 
-export interface Span {
-  from: string;
-  to: string;
-}
-
 export interface MonthPoint {
   month: string;
   minor: string;
 }
 
 export interface VariantDiff {
-  axis: { months: string[]; closedThrough: string };
   profit: { activeNetMinor: string; variantNetMinor: string; activeExitMinor: string | null; variantExitMinor: string | null };
   bridge: Array<{ key: BridgeKey; label: string; minor: string }>;
   events: Array<{ key: 'constructionEnd' | 'mainHandover' | 'exit'; label: string; active: string | null; variant: string | null }>;
-  spans: Array<{ key: 'sales' | 'construction' | 'overheads'; label: string; active: Span | null; variant: Span | null }>;
   cash: {
-    active: Array<string | null>;
-    variant: Array<string | null>;
     activeTrough: MonthPoint | null;
     variantTrough: MonthPoint | null;
     activePositive: string | null;
     variantPositive: string | null;
   };
-  funding: Array<{ sourceId: string; name: string; group: string; active: Array<string | null>; variant: Array<string | null> }>;
   interest: { activeMinor: string; variantMinor: string };
   notes: string[];
 }
@@ -137,18 +123,17 @@ function groupTotals(plan: ForecastPlan): Map<BridgeKey, bigint> {
   return totals;
 }
 
-function spanOf(plan: ForecastPlan, groups: string[]): Span | null {
-  let from: string | null = null;
+/** The last month a line of the groups has a cell other than 0. */
+function lastMonthOf(plan: ForecastPlan, groups: string[]): string | null {
   let to: string | null = null;
   for (const line of plan.lines) {
     if (typeof line.groupCode !== 'string' || !groups.includes(line.groupCode)) continue;
     for (const [month, value] of Object.entries(line.monthlyForecast)) {
       if (BigInt(value) === 0n) continue;
-      if (from === null || month < from) from = month;
       if (to === null || month > to) to = month;
     }
   }
-  return from === null || to === null ? null : { from, to };
+  return to;
 }
 
 function largestCellMonth(plan: ForecastPlan, groups: string[]): string | null {
@@ -160,14 +145,6 @@ function largestCellMonth(plan: ForecastPlan, groups: string[]): string | null {
     }
   }
   return best === null || BigInt(best.minor) <= 0n ? null : best.month;
-}
-
-function monthAxis(a: string[], b: string[]): string[] {
-  return [...new Set([...a, ...b])].sort();
-}
-
-function onAxis(axis: string[], record: Record<string, string>): Array<string | null> {
-  return axis.map((m) => record[m] ?? null);
 }
 
 function trough(record: Record<string, string>): MonthPoint | null {
@@ -188,7 +165,6 @@ function positiveAfter(record: Record<string, string>, low: MonthPoint | null): 
 function lineTotal(plan: ForecastPlan, codes: string[]): bigint {
   return plan.lines.filter((l) => codes.includes(l.code)).reduce((s, l) => s + sumCells(l.monthlyForecast), 0n);
 }
-
 
 function notesOf(input: VariantDiffInput, variant: Evaluation, bridge: Map<BridgeKey, bigint>): string[] {
   const { currency } = input;
@@ -221,7 +197,6 @@ function notesOf(input: VariantDiffInput, variant: Evaluation, bridge: Map<Bridg
 export function diffVariant(input: VariantDiffInput): VariantDiff {
   const active = EvalShape.parse(input.activeEval);
   const variant = EvalShape.parse(input.variantEval);
-  const axis = monthAxis(active.walk.months, variant.walk.months);
 
   const before = groupTotals(input.activePlan);
   const after = groupTotals(input.variantPlan);
@@ -232,11 +207,8 @@ export function diffVariant(input: VariantDiffInput): VariantDiff {
 
   const activeLow = trough(active.walk.cumulativeNetCashMinor);
   const variantLow = trough(variant.walk.cumulativeNetCashMinor);
-  const groupOf = new Map(variant.sourceGroups.map((g) => [g.sourceId, g.group]));
-  const activeSources = new Map(active.walk.sources.map((s) => [s.id, s.principalMinor]));
 
   return {
-    axis: { months: axis, closedThrough: input.closedThrough },
     profit: {
       activeNetMinor: active.netProfit,
       variantNetMinor: variant.netProfit,
@@ -248,8 +220,8 @@ export function diffVariant(input: VariantDiffInput): VariantDiff {
       {
         key: 'constructionEnd',
         label: 'Конец стройки',
-        active: spanOf(input.activePlan, ['D'])?.to ?? null,
-        variant: spanOf(input.variantPlan, ['D'])?.to ?? null,
+        active: lastMonthOf(input.activePlan, ['D']),
+        variant: lastMonthOf(input.variantPlan, ['D']),
       },
       {
         key: 'mainHandover',
@@ -259,26 +231,12 @@ export function diffVariant(input: VariantDiffInput): VariantDiff {
       },
       { key: 'exit', label: 'Выход', active: active.exit?.month ?? null, variant: variant.exit?.month ?? null },
     ],
-    spans: [
-      { key: 'sales', label: 'Продажи', active: spanOf(input.activePlan, ['R', 'C']), variant: spanOf(input.variantPlan, ['R', 'C']) },
-      { key: 'construction', label: 'Стройка', active: spanOf(input.activePlan, ['D']), variant: spanOf(input.variantPlan, ['D']) },
-      { key: 'overheads', label: 'Накладные', active: spanOf(input.activePlan, ['O']), variant: spanOf(input.variantPlan, ['O']) },
-    ],
     cash: {
-      active: onAxis(axis, active.walk.cumulativeNetCashMinor),
-      variant: onAxis(axis, variant.walk.cumulativeNetCashMinor),
       activeTrough: activeLow,
       variantTrough: variantLow,
       activePositive: positiveAfter(active.walk.cumulativeNetCashMinor, activeLow),
       variantPositive: positiveAfter(variant.walk.cumulativeNetCashMinor, variantLow),
     },
-    funding: variant.walk.sources.map((s) => ({
-      sourceId: s.id,
-      name: s.name,
-      group: groupOf.get(s.id) ?? 'other',
-      active: onAxis(axis, activeSources.get(s.id) ?? {}),
-      variant: onAxis(axis, s.principalMinor),
-    })),
     interest: { activeMinor: active.walk.interestTotalMinor, variantMinor: variant.walk.interestTotalMinor },
     notes: notesOf(input, variant, deltas),
   };

@@ -47,40 +47,36 @@ describe('kairon diffVariant, delay-3 against Forecast v3', () => {
     });
   });
 
-  it('reads the moved events and the spans of each line group from the plans', () => {
-    // SCENARIO: what a CFO sees on the timeline
+  it('reads the moved events from the plans', () => {
+    // SCENARIO: the events the changed paths and the explanation read
     // INPUT: the same delay-3 pair
-    // EXPECTED: construction end, main handover and exit each 3 months later; sales, construction, overhead spans end 3 months later
+    // EXPECTED: construction end, main handover and exit each 3 months later
     expect(diff.events.map((e) => [e.key, e.active, e.variant])).toEqual([
       ['constructionEnd', '2028-07', '2028-10'],
       ['mainHandover', '2028-06', '2028-09'],
       ['exit', '2028-07', '2028-10'],
     ]);
-    expect(diff.spans.map((s) => [s.key, s.active, s.variant])).toEqual([
-      ['sales', { from: '2024-12', to: '2028-07' }, { from: '2024-12', to: '2028-10' }],
-      ['construction', { from: '2025-05', to: '2028-07' }, { from: '2025-05', to: '2028-10' }],
-      ['overheads', { from: '2025-02', to: '2028-06' }, { from: '2025-02', to: '2028-09' }],
-    ]);
   });
 
-  it('puts cash and funding on one month axis with null outside a version', () => {
+  it('states the cash trough, the month back in plus and the interest', () => {
     // SCENARIO: active ends 2028-07, the variant 2028-10
     // INPUT: the same delay-3 pair
-    // EXPECTED: 47 months; trough -850 965 376,98 in 2028-03 vs -882 892 701,38 in 2028-06; back to plus 2028-06 vs 2028-09;
-    //           active cash and principal are null after 2028-07; 3 sources, the bank first
-    expect(diff.axis.months).toHaveLength(47);
-    expect([diff.axis.months[0], diff.axis.months.at(-1)]).toEqual(['2024-12', '2028-10']);
-    expect(diff.cash.activeTrough).toEqual({ month: '2028-03', minor: '-85096537698' });
-    expect(diff.cash.variantTrough).toEqual({ month: '2028-06', minor: '-88289270138' });
-    expect([diff.cash.activePositive, diff.cash.variantPositive]).toEqual(['2028-06', '2028-09']);
-    expect(diff.cash.active.slice(-3)).toEqual([null, null, null]);
-    expect(diff.funding.map((f) => [f.name, f.group])).toEqual([
-      ['Bank Financing', 'bank'],
-      ['Solstice Sponsor loan', 'partner'],
-      ['Cedar Partners loan', 'partner'],
-    ]);
-    expect([diff.funding[1]?.active.at(-1), diff.funding[1]?.variant.at(-1)]).toEqual([null, '22480264671']);
+    // EXPECTED: trough -850 965 376,98 in 2028-03 vs -882 892 701,38 in 2028-06; back to plus 2028-06 vs 2028-09
+    expect(diff.cash).toEqual({
+      activeTrough: { month: '2028-03', minor: '-85096537698' },
+      variantTrough: { month: '2028-06', minor: '-88289270138' },
+      activePositive: '2028-06',
+      variantPositive: '2028-09',
+    });
     expect(diff.interest).toEqual({ activeMinor: '11789401998', variantMinor: '12956739085' });
+  });
+
+  it('carries no series for charts the page no longer draws (DEV-1381)', () => {
+    // SCENARIO: the month axis, the group spans, the cash series and the funding series fed the page's own
+    //           timeline and charts; the catalog widgets draw those figures from widget data
+    // INPUT: the same delay-3 pair
+    // EXPECTED: the diff has the keys profit, bridge, events, cash, interest, notes and no other
+    expect(Object.keys(diff).sort()).toEqual(['bridge', 'cash', 'events', 'interest', 'notes', 'profit']);
   });
 
   it('notes typed interest, rule-proposed draws and a bank that never starts', () => {

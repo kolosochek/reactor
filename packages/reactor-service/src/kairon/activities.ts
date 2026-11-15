@@ -477,7 +477,6 @@ export interface ScoredVariant {
   goalChecks: GoalCheck[];
   changed: PathChange[];
   diffView: DiffView | null;
-  /** What w1 and w2 read from the parent's and the draft's evaluation; null unless Kairon scored it. */
   /**
    * Catalog widget id to that widget's data, the parent as the baseline (DEV-1380); null unless Kairon scored
    * the draft. This field and widgetErrors exist only when a widgets catalog is loaded.
@@ -575,17 +574,19 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
   const currency = currencyOf(b);
   const extraPaths = catalog === null ? [] : catalogPaths(catalog.manifest);
   const widgetContext = { currency: { code: b.project.currencyCode, decimals: b.project.decimals }, closedThrough: b.closedThrough };
-  // The document a widget reads for a body. An evaluate body carries the plan only, and evaluate does not
-  // move milestones, so every draft and every parent states the active version's milestones (DEV-1381).
-  // The package's document takes dated milestones, so one with no due date is left out.
-  const milestoneEntries = b.milestones.filter((m) => m.dueDate !== null);
-  const documentOf = (body: EvaluateBody) => ({ ...body, milestones: { entries: milestoneEntries } });
+  // The document a widget reads for a body. An evaluate body carries the plan only. The active forecast states
+  // its version's milestones; no patch op moves a milestone, so a draft states none of its own and the package
+  // says the shift is unknown (DEV-1381). The package's document takes dated milestones: one with no due date
+  // is left out and named once per run in `undatedMilestones`.
+  const datedMilestones = b.milestones.filter((m) => m.dueDate !== null);
+  const undatedMilestones = b.milestones.filter((m) => m.dueDate === null).map((m) => m.code);
+  const documentOf = (body: EvaluateBody, active: boolean) => ({ ...body, milestones: { entries: active ? datedMilestones : [] } });
   /** A parent as a widget subject: the active forecast under its version name, a parent draft under its id. */
   const parentSubject = (side: ParentSide): SubjectInput => ({
     id: side.key,
     label: side.key === 'active' ? b.forecastVersion.name : side.key,
     role: side.key === 'active' ? 'active' : 'draft',
-    document: documentOf(side.body),
+    document: documentOf(side.body, side.key === 'active'),
     evaluation: side.eval,
     context: widgetContext,
   });
@@ -665,7 +666,7 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
         ? null
         : cutWidgetData(
             catalog,
-            { id: v.id, label: v.id, role: 'draft', document: documentOf(body), evaluation: res.json, context: widgetContext },
+            { id: v.id, label: v.id, role: 'draft', document: documentOf(body, false), evaluation: res.json, context: widgetContext },
             parentSubject(parent),
           );
     return {
@@ -693,18 +694,7 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
         parentNetProfitMinor: parent.metrics.netProfitMinor,
         currency,
       }),
-      changed: changedPaths(
-        {
-          parentBody: parent.body,
-          draftBody: body,
-          parentEval: parent.eval,
-          draftEval: res.json,
-          diff,
-          parentDocument: documentOf(parent.body),
-          draftDocument: documentOf(body),
-        },
-        extraPaths,
-      ),
+      changed: changedPaths({ parentBody: parent.body, draftBody: body, parentEval: parent.eval, draftEval: res.json, diff }, extraPaths),
       diffView: forecastDiffView({
         parentPlan: parent.body.plan,
         draftPlan: body.plan,
@@ -798,6 +788,8 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
     facts,
     approved: b.approved,
     active: b.active,
+    // Milestone codes the widgets leave out for having no due date; the key exists only with a widgets catalog.
+    ...(catalog === null ? {} : { undatedMilestones }),
   };
 }
 

@@ -1,6 +1,6 @@
-// Widgets chosen by changed paths (DEV-1375, spec 5.5): the server lists the
-// JSON paths a draft changes against its parent; stage 4 blocks cover most of
-// them, and funding.draws always gets the matrix-diff (w1).
+// Widgets of a scored draft (DEV-1375 spec 5.5, DEV-1381): the server lists the
+// JSON paths a draft changes against its parent, the ones a widgets manifest
+// reads among them; the goal check is the one widget the service draws itself.
 
 import { describe, expect, it } from 'vitest';
 import { diffVariant } from '../kairon/diff.js';
@@ -14,16 +14,8 @@ const parentEval = readStage5('eval-active.json');
 
 type RawEval = { netProfit: string | null; exit: { month: string }; walk: { uncoveredNeedMinor: Record<string, string> } };
 
-/**
- * The changed paths of a stage 5 draft; `extra` asks for the paths a widgets manifest reads, `edit` alters a copy
- * of the draft's evaluation and `documents` gives the widget subjects' documents in place of the bodies.
- */
-function changedFor(
-  file: string,
-  extra: string[] = [],
-  edit: (evaluation: RawEval) => void = () => {},
-  documents: { parentDocument?: unknown; draftDocument?: unknown } = {},
-) {
+/** The changed paths of a stage 5 draft; `extra` asks for the paths a widgets manifest reads and `edit` alters a copy of the draft's evaluation. */
+function changedFor(file: string, extra: string[] = [], edit: (evaluation: RawEval) => void = () => {}) {
   const draftBody = readStage5(`${file}.body.json`) as EvaluateBody;
   const draftEval = structuredClone(readStage5(`${file}.eval.json`)) as RawEval;
   edit(draftEval);
@@ -36,7 +28,7 @@ function changedFor(
     activeEval: parentEval,
     variantEval: draftEval,
   });
-  return changedPaths({ parentBody, draftBody, parentEval, draftEval, diff, ...documents }, extra);
+  return changedPaths({ parentBody, draftBody, parentEval, draftEval, diff }, extra);
 }
 
 describe('kairon changedPaths', () => {
@@ -174,16 +166,12 @@ describe('kairon changedPaths with a widgets catalog (DEV-1380)', () => {
     expect(changedFor('cover-cedar', ['exit.partners', 'walk.cumulativeNetCashMinor'])).toEqual(COVER);
   });
 
-  it('reads document paths from the subjects\' documents when they are given', () => {
-    // SCENARIO: the widget subjects carry milestones the evaluate bodies lack
-    // INPUT: cover-cedar, extra path document.milestones; the parent's document with one milestone, the draft's with
-    //        the same one moved; then both with the same one
-    // EXPECTED: document.milestones with 1 cell when it moved; not listed when both sides state the same
-    const stated = (dueDate: string) => ({ milestones: { entries: [{ code: 'M1', dueDate }] } });
-    expect([
-      changedFor('cover-cedar', ['document.milestones'], () => {}, { parentDocument: stated('2027-12-01'), draftDocument: stated('2028-03-01') }),
-      changedFor('cover-cedar', ['document.milestones'], () => {}, { parentDocument: stated('2027-12-01'), draftDocument: stated('2027-12-01') }),
-    ]).toEqual([[...COVER, { path: 'document.milestones', cells: 1 }], COVER]);
+  it('never counts the milestones: a draft states none of its own', () => {
+    // SCENARIO: the active forecast's document carries milestones and a draft's carries none; that is a gap in
+    //           what the draft states, and no patch op moves a milestone (review I1)
+    // INPUT: cover-cedar, extra path document.milestones
+    // EXPECTED: the cover paths alone
+    expect(changedFor('cover-cedar', ['document.milestones'])).toEqual(COVER);
   });
 });
 

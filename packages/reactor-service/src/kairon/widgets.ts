@@ -124,8 +124,8 @@ function differing<V>(a: Map<string, V> | Record<string, V>, b: Map<string, V> |
 /**
  * The paths a draft changed against its parent. `extra` names the paths a widgets manifest reads
  * (`catalogPaths`); each is counted from the two evaluations, or for a `document.` path from the
- * two documents: the widget subjects' documents when given, the evaluate bodies otherwise. A path
- * the service counts itself is listed once, under its own counter.
+ * two evaluate bodies. A body carries no milestones, so `document.milestones` is never counted:
+ * no patch op moves a milestone. A path the service counts itself is listed once, under its own counter.
  */
 export function changedPaths(
   input: {
@@ -134,8 +134,6 @@ export function changedPaths(
     parentEval: unknown;
     draftEval: unknown;
     diff: VariantDiff;
-    parentDocument?: unknown;
-    draftDocument?: unknown;
   },
   extra: readonly string[] = [],
 ): PathChange[] {
@@ -149,8 +147,8 @@ export function changedPaths(
     { path: 'exit.partners', cells: differing(irrOf(parent), irrOf(draft), null) },
     { path: 'events', cells: input.diff.events.filter((e) => e.active !== e.variant).length },
   ];
-  const parentSide = { document: input.parentDocument ?? input.parentBody, evaluation: input.parentEval };
-  const draftSide = { document: input.draftDocument ?? input.draftBody, evaluation: input.draftEval };
+  const parentSide = { document: input.parentBody, evaluation: input.parentEval };
+  const draftSide = { document: input.draftBody, evaluation: input.draftEval };
   for (const path of new Set(extra)) {
     if ((OWN_PATHS as readonly string[]).includes(path)) continue;
     counts.push({ path, cells: cellsBetween(readAt(parentSide, path), readAt(draftSide, path)) });
