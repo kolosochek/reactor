@@ -107,5 +107,35 @@ describe('the stage 5 demo session recording (DEV-1381)', () => {
       overLimit: drafts.filter((draft) => draft.bytes > LIMIT_PER_DRAFT).map((draft) => draft.bytes),
     }).toEqual({ runs: 12, widgetDataKeys: 0, fullOutsideRunDone: 0, drafts: 9, instances: 114, builds: ['2026-11-15T11:44:54.327Z'], overLimit: [] });
   });
-});
 
+  it('gives no draft milestones of its own and names no undated milestone', () => {
+    // SCENARIO: no patch op moves a milestone, so a draft states none and the package says the shift is unknown;
+    //           Rivergate's 10 milestones all have a due date (review I1, M1)
+    // INPUT: demo-session.ndjson
+    // EXPECTED: 3 milestone-band instances, each with 0 draft milestones and the active version's 10; the 5 runs
+    //           that scored drafts name no undated milestone
+    const file = fileURLToPath(new URL('./fixtures/kairon/stage5/demo-session.ndjson', import.meta.url));
+    const outputs = readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line) as { type: string; payload: { solution?: { output?: Record<string, unknown> } } })
+      .filter((event) => event.type === 'run.done')
+      .map((event) => event.payload.solution?.output ?? {});
+    const bands = outputs.flatMap((output) => {
+      const widgets = output['widgets'] as { instances?: Record<string, Array<{ widget: string; data: { milestones: unknown[]; baselineMilestones: unknown[] } }>> } | undefined;
+      return Object.values(widgets?.instances ?? {})
+        .flat()
+        .filter((instance) => instance.widget === 'milestone-band')
+        .map((instance) => [instance.data.milestones.length, instance.data.baselineMilestones.length]);
+    });
+    const undated = outputs.flatMap((output) => (isRecord(output['scored']) ? [output['scored']['undatedMilestones']] : []));
+    expect([bands, undated]).toEqual([
+      [
+        [0, 10],
+        [0, 10],
+        [0, 10],
+      ],
+      [[], [], [], [], []],
+    ]);
+  });
+});
