@@ -9,7 +9,7 @@ import { createKaironActivities } from '../kairon/activities.js';
 import type { Baseline } from '../kairon/baseline.js';
 import { planHash, type DraftLineage } from '../kairon/lineage.js';
 import { loadWidgetCatalog, type WidgetCatalog } from '../kairon/widgetCatalog.js';
-import type { HttpResult } from '../kairon/client.js';
+import type { HttpResult, KaironMilestone } from '../kairon/client.js';
 import { fakeKaironApi, fixtureDoc, RIVERGATE_FUNDING_SETTINGS, stage5Evaluate } from './_helpers/kaironFake.js';
 import { writeStubWidgetsDist } from './_helpers/widgetsStub.js';
 
@@ -46,12 +46,16 @@ interface ScoredOut {
 
 type Evaluate = (versionId: string, body: unknown) => HttpResult;
 
+/** Scores drafts on the fake Kairon; `milestones` replaces the one milestone the fake serves. */
 async function score(
   input: Record<string, unknown>,
   widgets: (() => Promise<WidgetCatalog | null>) | undefined,
   evaluate: Evaluate = stage5Evaluate,
+  milestones?: KaironMilestone[],
 ): Promise<ScoredOut> {
-  const activities = createKaironActivities(fakeKaironApi(evaluate, { partners: true }), widgets);
+  const fake = fakeKaironApi(evaluate, { partners: true });
+  const api = milestones === undefined ? fake : { ...fake, projectId: fake.projectId, pinnedVersionId: fake.pinnedVersionId, getMilestones: async () => milestones };
+  const activities = createKaironActivities(api, widgets);
   const b = (await activities['kairon.baseline']({}, ctx)) as Baseline;
   return (await activities['kairon.scoreVariants']({ baseline: b, goals: [], parents: [], ...input }, ctx)) as ScoredOut;
 }
@@ -65,6 +69,9 @@ const STUB_DATA = (widget: string, current: string, baseline: { id: string; labe
   closedThrough: '2026-08',
   months: 44,
   planLines: 45,
+  // Evaluate does not move milestones, so a draft and its parent both state the active version's (DEV-1381).
+  milestones: ['OCCUPANCY_PERMIT 2027-12-30'],
+  baselineMilestones: ['OCCUPANCY_PERMIT 2027-12-30'],
 });
 const ACTIVE = { id: 'active', label: 'Forecast v3', role: 'active' };
 
@@ -89,7 +96,8 @@ describe('kairon.scoreVariants with a widgets catalog', () => {
     // SCENARIO: a top-level draft; the catalog's widgets read the cash line, the net profit and the exit month
     // INPUT: S2 v1 against the active forecast «Forecast v3», the stub catalog
     // EXPECTED: data for both stub widgets naming v1 (draft) and Forecast v3 (active), CZK with 2 decimals,
-    //           closed through 2026-08, 44 months, 45 plan lines; no errors; netProfit joins the changed paths
+    //           closed through 2026-08, 44 months, 45 plan lines, the active version's milestone on both sides;
+    //           no errors; netProfit joins the changed paths
     const out = await score({ proposals: { variants: [draft('v1', V1_LINEAGE)] } }, stub);
     const v1 = out.variants[0];
     expect([v1?.widgetData, v1?.widgetErrors, v1?.changed]).toEqual([
@@ -112,6 +120,31 @@ describe('kairon.scoreVariants with a widgets catalog', () => {
     const out = await score({ proposals: { variants: [draft('v1.1', V1_1_LINEAGE, 'v1')] }, parents: [{ id: 'v1', lineage: V1_LINEAGE }] }, stub);
     const data = out.variants[0]?.widgetData as Record<string, { baseline: unknown }> | undefined;
     expect([out.variants[0]?.status, data?.['stub-cash']?.baseline]).toEqual(['ok', [{ id: 'v1', label: 'v1', role: 'draft' }]]);
+  });
+
+  it('gives a child draft and its parent draft the active version\'s milestones', async () => {
+    // SCENARIO: an evaluate body carries the plan only; without milestones a widget calls every shift unknown
+    // INPUT: v1.1 with parent v1, the stub catalog
+    // EXPECTED: the one milestone of the active version on the draft and on its parent
+    const out = await score({ proposals: { variants: [draft('v1.1', V1_1_LINEAGE, 'v1')] }, parents: [{ id: 'v1', lineage: V1_LINEAGE }] }, stub);
+    const data = out.variants[0]?.widgetData as Record<string, { milestones: unknown; baselineMilestones: unknown }> | undefined;
+    expect([data?.['stub-cash']?.milestones, data?.['stub-cash']?.baselineMilestones]).toEqual([
+      ['OCCUPANCY_PERMIT 2027-12-30'],
+      ['OCCUPANCY_PERMIT 2027-12-30'],
+    ]);
+  });
+
+  it('leaves a milestone with no due date out of the documents', async () => {
+    // SCENARIO: Kairon serves a milestone whose due date is not set; the package's document takes dated milestones only
+    // INPUT: milestones LAND (2026-01-15) and HANDOVER (no due date); S2 v1, the stub catalog
+    // EXPECTED: LAND alone on both sides, and no widget error
+    const out = await score({ proposals: { variants: [draft('v1', V1_LINEAGE)] } }, stub, stage5Evaluate, [
+      { code: 'LAND', name: 'Land', dueDate: '2026-01-15', completedAt: null },
+      { code: 'HANDOVER', name: 'Handover', dueDate: null, completedAt: null },
+    ]);
+    const v1 = out.variants[0];
+    const data = v1?.widgetData as Record<string, { milestones: unknown; baselineMilestones: unknown }> | undefined;
+    expect([data?.['stub-cash']?.milestones, data?.['stub-cash']?.baselineMilestones, v1?.widgetErrors]).toEqual([['LAND 2026-01-15'], ['LAND 2026-01-15'], []]);
   });
 
   it('keeps scoring when one widget cannot cut its data, and names it', async () => {
@@ -144,11 +177,12 @@ describe('kairon.scoreVariants with a widgets catalog', () => {
 const REAL_DIST = (process.env.KAIRON_WIDGETS_DIST ?? '').trim();
 
 describe.skipIf(REAL_DIST === '')('kairon.scoreVariants with the real widgets build', () => {
-  it('cuts cash-line for S2 v1 against the active forecast', async () => {
-    // SCENARIO: the page will draw the cumulative cash of v1 against Forecast v3 from this data
+  it('cuts every widget of the wave 1 build for S2 v1 against the active forecast', async () => {
+    // SCENARIO: the page will draw v1 against Forecast v3 from this data (DEV-1381: 14 widgets)
     // INPUT: S2 v1, the build KAIRON_WIDGETS_DIST names
-    // EXPECTED: the header (CZK, closed 2026-08, v1 against Forecast v3); 44 months on both sides;
-    //           2026-08 equal on both sides and 2026-09 lower for the draft by 3 013 205,75 CZK
+    // EXPECTED: data for all 14 widgets and no error; cash-line: the header (CZK, closed 2026-08, v1 against
+    //           Forecast v3), 44 months on both sides, 2026-08 equal on both sides and 2026-09 lower for the
+    //           draft by 3 013 205,75 CZK; milestone-band: the active version's one milestone on both sides
     const out = await score({ proposals: { variants: [draft('v1', V1_LINEAGE)] } }, () => loadWidgetCatalog({ KAIRON_WIDGETS_DIST: REAL_DIST }));
     const v1 = out.variants[0];
     type Point = { month: string; amountMinor: string };
@@ -161,6 +195,7 @@ describe.skipIf(REAL_DIST === '')('kairon.scoreVariants with the real widgets bu
       baselinePoints: Point[];
     };
     const at = (points: Point[], month: string) => points.find((p) => p.month === month)?.amountMinor;
+    const band = (v1?.widgetData ?? {})['milestone-band'] as { milestones: Array<{ code: string }>; baselineMilestones: Array<{ code: string }> };
     expect({
       errors: v1?.widgetErrors,
       widgets: Object.keys(v1?.widgetData ?? {}).sort(),
@@ -168,13 +203,30 @@ describe.skipIf(REAL_DIST === '')('kairon.scoreVariants with the real widgets bu
       months: [cash.currentPoints.length, cash.baselinePoints.length],
       august: [at(cash.currentPoints, '2026-08'), at(cash.baselinePoints, '2026-08')],
       september: [at(cash.currentPoints, '2026-09'), at(cash.baselinePoints, '2026-09')],
+      milestones: [band.milestones.map((m) => m.code), band.baselineMilestones.map((m) => m.code)],
     }).toEqual({
       errors: [],
-      widgets: ['cash-line', 'kpi-tiles'],
+      widgets: [
+        'bank-card',
+        'cash-line',
+        'draws-bars',
+        'draws-matrix',
+        'kpi-tiles',
+        'milestone-band',
+        'need-rows',
+        'partner-frames',
+        'partner-returns',
+        'plan-bridge',
+        'profit-ladder',
+        'scenario-metrics',
+        'share-mix',
+        'signals',
+      ],
       header: [{ code: 'CZK', decimals: 2 }, ['2026-08'], { id: 'v1', label: 'v1', role: 'draft' }, [{ id: 'active', label: 'Forecast v3', role: 'active' }]],
       months: [44, 44],
       august: ['-34738050274', '-34738050274'],
       september: ['-37715335486', '-37414014911'],
+      milestones: [['OCCUPANCY_PERMIT'], ['OCCUPANCY_PERMIT']],
     });
   });
 });

@@ -576,12 +576,17 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
   const currency = currencyOf(b);
   const extraPaths = catalog === null ? [] : catalogPaths(catalog.manifest);
   const widgetContext = { currency: { code: b.project.currencyCode, decimals: b.project.decimals }, closedThrough: b.closedThrough };
+  // The document a widget reads for a body. An evaluate body carries the plan only, and evaluate does not
+  // move milestones, so every draft and every parent states the active version's milestones (DEV-1381).
+  // The package's document takes dated milestones, so one with no due date is left out.
+  const milestoneEntries = b.milestones.filter((m) => m.dueDate !== null);
+  const documentOf = (body: EvaluateBody) => ({ ...body, milestones: { entries: milestoneEntries } });
   /** A parent as a widget subject: the active forecast under its version name, a parent draft under its id. */
   const parentSubject = (side: ParentSide): SubjectInput => ({
     id: side.key,
     label: side.key === 'active' ? b.forecastVersion.name : side.key,
     role: side.key === 'active' ? 'active' : 'draft',
-    document: side.body,
+    document: documentOf(side.body),
     evaluation: side.eval,
     context: widgetContext,
   });
@@ -662,7 +667,7 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
         ? null
         : cutWidgetData(
             catalog,
-            { id: v.id, label: v.id, role: 'draft', document: body, evaluation: res.json, context: widgetContext },
+            { id: v.id, label: v.id, role: 'draft', document: documentOf(body), evaluation: res.json, context: widgetContext },
             parentSubject(parent),
           );
     return {
@@ -690,7 +695,18 @@ async function scoreVariants(api: KaironApi, raw: unknown, catalog: WidgetCatalo
         parentNetProfitMinor: parent.metrics.netProfitMinor,
         currency,
       }),
-      changed: changedPaths({ parentBody: parent.body, draftBody: body, parentEval: parent.eval, draftEval: res.json, diff }, extraPaths),
+      changed: changedPaths(
+        {
+          parentBody: parent.body,
+          draftBody: body,
+          parentEval: parent.eval,
+          draftEval: res.json,
+          diff,
+          parentDocument: documentOf(parent.body),
+          draftDocument: documentOf(body),
+        },
+        extraPaths,
+      ),
       diffView: forecastDiffView({
         parentPlan: parent.body.plan,
         draftPlan: body.plan,

@@ -21,6 +21,7 @@ const known = (id) => {
   if (found === undefined) throw new Error('unknown widget "' + id + '"');
   return found;
 };
+const milestonesOf = (subject) => (subject.snapshot.document.milestones?.entries ?? []).map((entry) => entry.code + ' ' + entry.dueDate);
 export const buildId = ${JSON.stringify(STUB_BUILD_ID)};
 export function parseSnapshot(raw) {
   if (raw.evaluation === null || typeof raw.evaluation !== 'object') throw new Error('snapshot has no evaluation');
@@ -39,6 +40,8 @@ export const catalog = {
       closedThrough: input.current.snapshot.context.closedThrough,
       months: Object.keys(input.current.snapshot.evaluation.walk.cumulativeNetCashMinor).length,
       planLines: input.current.snapshot.document.plan.lines.length,
+      milestones: milestonesOf(input.current),
+      baselineMilestones: input.baseline === null ? [] : milestonesOf(input.baseline),
     };
   },
   parseSpec(raw) {

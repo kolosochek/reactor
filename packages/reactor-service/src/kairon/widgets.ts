@@ -16,23 +16,25 @@ import type { CatalogSpec, WidgetCatalog, WidgetInstance, WidgetManifestEntry } 
 
 export type ChangedPath = 'plan.lines' | 'funding.draws' | 'walk.cumulativeNetCashMinor' | 'exit.partners' | 'events';
 
-/**
- * Paths counted only for a widgets catalog whose manifest reads them (DEV-1380). Without a catalog
- * the list of changed paths, and so the widgets prompt, stays as it was.
- */
-export const CATALOG_PATHS = ['netProfit', 'exit.month', 'walk.uncoveredNeedMinor'] as const;
-export type CatalogPath = (typeof CATALOG_PATHS)[number];
+/** The paths counted with or without a widgets catalog, each by its own counter. */
+const OWN_PATHS: readonly ChangedPath[] = ['plan.lines', 'funding.draws', 'walk.cumulativeNetCashMinor', 'exit.partners', 'events'];
 
-/** A changed path and how many cells (lines' months, source-months, months, partners, events) it changed. */
+/**
+ * A changed path and how many cells it changed. An own path counts lines' months, source-months,
+ * months, partners or events; a path a widgets manifest reads counts records, keys or 1 (see `cellsBetween`).
+ */
 export interface PathChange {
-  path: ChangedPath | CatalogPath;
+  path: string;
   cells: number;
 }
 
-/** The catalog paths a manifest's widgets read, once each, in the order of CATALOG_PATHS. */
-export function catalogPaths(manifest: Array<{ reads: string[] }>): CatalogPath[] {
-  const reads = new Set(manifest.flatMap((entry) => entry.reads));
-  return CATALOG_PATHS.filter((path) => reads.has(path));
+/**
+ * Every path a manifest's widgets read, once each, in manifest order (DEV-1381). The service counts
+ * each one generically, so a widget is never left without an instance for reading a path the
+ * service has no counter for.
+ */
+export function catalogPaths(manifest: Array<{ reads: string[] }>): string[] {
+  return [...new Set(manifest.flatMap((entry) => entry.reads))];
 }
 
 export const EXISTING_WIDGETS: Record<Exclude<ChangedPath, 'funding.draws'>, 'bridge' | 'cash' | 'irr' | 'timeline'> = {
@@ -105,20 +107,57 @@ const PathShape = z.object({
 
 type Evaluation = z.infer<typeof PathShape>;
 
-/** What the catalog paths read; parsed only when one of them is asked for. */
-const CatalogPathShape = z.object({
-  netProfit: z.string().nullable(),
-  exit: z.object({ month: z.string() }).nullable(),
-  walk: z.object({ uncoveredNeedMinor: z.record(z.string()) }),
-});
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
-type CatalogEvaluation = z.infer<typeof CatalogPathShape>;
+/** JSON with object keys sorted, so two records that differ only in key order are the same record. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (!isRecord(value)) return JSON.stringify(value) ?? 'undefined';
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+}
 
-const CATALOG_COUNTERS: Record<CatalogPath, (parent: CatalogEvaluation, draft: CatalogEvaluation) => number> = {
-  netProfit: (parent, draft) => (parent.netProfit === draft.netProfit ? 0 : 1),
-  'exit.month': (parent, draft) => ((parent.exit?.month ?? null) === (draft.exit?.month ?? null) ? 0 : 1),
-  'walk.uncoveredNeedMinor': (parent, draft) => differing(parent.walk.uncoveredNeedMinor, draft.walk.uncoveredNeedMinor, '0'),
-};
+/** The value at a dotted path; a step into a list reads the rest of the path from every item. */
+function valueAt(root: unknown, steps: string[]): unknown {
+  const [step, ...rest] = steps;
+  if (step === undefined) return root;
+  if (Array.isArray(root)) return root.map((item) => valueAt(item, steps));
+  return isRecord(root) ? valueAt(root[step], rest) : undefined;
+}
+
+/**
+ * How many cells differ between two values of one path: for two lists, the records one side has
+ * and the other lacks (the larger side); for two maps, the keys whose values differ; otherwise 1
+ * when the values differ.
+ */
+function cellsBetween(parent: unknown, draft: unknown): number {
+  if (Array.isArray(parent) && Array.isArray(draft)) {
+    const left = parent.map(canonical);
+    const right = draft.map(canonical);
+    const missingFrom = (from: string[], other: string[]) => {
+      const spare = new Map<string, number>();
+      for (const item of other) spare.set(item, (spare.get(item) ?? 0) + 1);
+      return from.filter((item) => {
+        const count = spare.get(item) ?? 0;
+        spare.set(item, count - 1);
+        return count <= 0;
+      }).length;
+    };
+    return Math.max(missingFrom(left, right), missingFrom(right, left));
+  }
+  if (isRecord(parent) && isRecord(draft)) {
+    return [...new Set([...Object.keys(parent), ...Object.keys(draft)])].filter((key) => canonical(parent[key]) !== canonical(draft[key])).length;
+  }
+  return canonical(parent) === canonical(draft) ? 0 : 1;
+}
+
+/** A forecast as the manifest's paths read it: `document.<path>` from the document, any other path from the evaluation. */
+function readAt(side: { document: unknown; evaluation: unknown }, path: string): unknown {
+  const steps = path.split('.');
+  return steps[0] === 'document' ? valueAt(side.document, steps.slice(1)) : valueAt(side.evaluation, steps);
+}
 
 function drawCells(e: Evaluation): Map<string, bigint> {
   const cells = new Map<string, bigint>();
@@ -136,8 +175,10 @@ function differing<V>(a: Map<string, V> | Record<string, V>, b: Map<string, V> |
 }
 
 /**
- * The paths a draft changed against its parent. `extra` names the catalog paths to count as well
- * (the ones the loaded widgets read); a name with no counter is ignored.
+ * The paths a draft changed against its parent. `extra` names the paths a widgets manifest reads
+ * (`catalogPaths`); each is counted from the two evaluations, or for a `document.` path from the
+ * two documents: the widget subjects' documents when given, the evaluate bodies otherwise. A path
+ * the service counts itself is listed once, under its own counter.
  */
 export function changedPaths(
   input: {
@@ -146,6 +187,8 @@ export function changedPaths(
     parentEval: unknown;
     draftEval: unknown;
     diff: VariantDiff;
+    parentDocument?: unknown;
+    draftDocument?: unknown;
   },
   extra: readonly string[] = [],
 ): PathChange[] {
@@ -159,11 +202,11 @@ export function changedPaths(
     { path: 'exit.partners', cells: differing(irrOf(parent), irrOf(draft), null) },
     { path: 'events', cells: input.diff.events.filter((e) => e.active !== e.variant).length },
   ];
-  const asked = CATALOG_PATHS.filter((path) => extra.includes(path));
-  if (asked.length > 0) {
-    const catalogParent = CatalogPathShape.parse(input.parentEval);
-    const catalogDraft = CatalogPathShape.parse(input.draftEval);
-    for (const path of asked) counts.push({ path, cells: CATALOG_COUNTERS[path](catalogParent, catalogDraft) });
+  const parentSide = { document: input.parentDocument ?? input.parentBody, evaluation: input.parentEval };
+  const draftSide = { document: input.draftDocument ?? input.draftBody, evaluation: input.draftEval };
+  for (const path of new Set(extra)) {
+    if ((OWN_PATHS as readonly string[]).includes(path)) continue;
+    counts.push({ path, cells: cellsBetween(readAt(parentSide, path), readAt(draftSide, path)) });
   }
   return counts.filter((c) => c.cells > 0);
 }
@@ -203,15 +246,9 @@ export function withMandatory(specs: WidgetSpec[], changed: PathChange[]): Widge
 
 // ---------- catalog widgets (DEV-1380) ----------
 
-/** Russian titles of the shipped catalog widgets; the manifest's own titles are English. */
-const CATALOG_TITLES_RU: Record<string, string> = {
-  'cash-line': 'Накопленный денежный поток',
-  'kpi-tiles': 'Ключевые показатели',
-};
-
-/** The spec the server writes for a catalog widget the LLM gave none for: a title and no narrowing. */
+/** The spec the server writes for a catalog widget the LLM gave none for: the manifest's title and no narrowing. */
 export function defaultCatalogSpec(entry: Pick<WidgetManifestEntry, 'id' | 'title'>): CatalogSpec {
-  return { widget: entry.id, title: CATALOG_TITLES_RU[entry.id] ?? entry.title, focus: { sourceIds: [], partnerIds: [], lineCodes: [] } };
+  return { widget: entry.id, title: entry.title, focus: { sourceIds: [], partnerIds: [], lineCodes: [] } };
 }
 
 // The LLM gives a widget and a title. Its prompt lists no source, partner or line ids, so a focus

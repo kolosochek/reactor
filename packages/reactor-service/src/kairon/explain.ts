@@ -34,7 +34,6 @@ import {
   OWN_WIDGETS,
   WidgetSpecSchema,
   withMandatory,
-  type ChangedPath,
   type WidgetSpec,
 } from './widgets.js';
 
@@ -113,7 +112,7 @@ export async function planWidgets(
   const input = PlanWidgetsInput.parse(raw);
   const ok = input.scored.variants
     .filter((v) => v.status === 'ok')
-    .map((v) => ({ id: v.id, changed: v.changed.map((c) => ({ path: c.path as ChangedPath, cells: c.cells })), widgetData: v.widgetData ?? null }));
+    .map((v) => ({ id: v.id, changed: v.changed.map((c) => ({ path: c.path, cells: c.cells })), widgetData: v.widgetData ?? null }));
   if (ok.length === 0) return catalog === null ? { widgets: {} } : { widgets: {}, instances: {} };
   const ids = ok.map((v) => v.id);
   const catalogIds = catalog === null ? [] : catalog.manifest.map((entry) => entry.id);

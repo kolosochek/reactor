@@ -74,6 +74,8 @@ describe('loadWidgetCatalog', () => {
         closedThrough: '2026-08',
         months: 3,
         planLines: 1,
+        milestones: [],
+        baselineMilestones: [],
       },
       provenance: 'kairon',
       buildId: STUB_BUILD_ID,

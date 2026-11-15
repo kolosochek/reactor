@@ -224,6 +224,39 @@ describe('kairon.planWidgets with a widgets catalog (DEV-1380)', () => {
   });
 });
 
+const REAL_DIST = (process.env.KAIRON_WIDGETS_DIST ?? '').trim();
+
+describe.skipIf(REAL_DIST === '')('kairon.planWidgets with the real widgets build (DEV-1381)', () => {
+  it('offers every widget of the manifest to the LLM, by title alone', async () => {
+    // SCENARIO: the wave 1 build carries 14 widgets; the LLM may title any of them and narrow none
+    // INPUT: one ok draft, the build KAIRON_WIDGETS_DIST names
+    // EXPECTED: the catalog alternative's widget enum is the manifest's ids in manifest order; its properties are
+    //           widget and title, both required; the prompt has one line per widget and never says «focus»
+    const catalog = await loadWidgetCatalog({ KAIRON_WIDGETS_DIST: REAL_DIST });
+    if (catalog === null) throw new Error('the widgets build did not load');
+    const real = createKaironActivities(fakeKaironApi(baselineEvaluate), async () => catalog);
+    const llm = scriptedLlm([JSON.stringify({ widgets: [] })]);
+    await real['kairon.planWidgets']({ scored: { variants: [{ id: 'v1', status: 'ok', changed: [{ path: 'funding.draws', cells: 36 }], widgetData: {} }] } }, ctxWith(llm));
+    const request = llm.complete.mock.calls[0]?.[0] as unknown as {
+      messages: Array<{ content: string }>;
+      responseSchema: {
+        schema: { properties: { widgets: { items: { properties: { specs: { items: { anyOf: Array<{ properties: Record<string, { enum?: string[] }>; required: string[] }> } } } } } } };
+      };
+    };
+    const system = request.messages[0]?.content ?? '';
+    const alternative = request.responseSchema.schema.properties.widgets.items.properties.specs.items.anyOf.at(-1);
+    const ids = catalog.manifest.map((entry) => entry.id);
+    expect([
+      ids.length,
+      alternative?.properties['widget']?.enum,
+      Object.keys(alternative?.properties ?? {}),
+      alternative?.required,
+      ids.filter((id) => system.includes(`\n- ${id}: `)).length,
+      system.includes('focus'),
+    ]).toEqual([14, ids, ['widget', 'title'], ['widget', 'title'], 14, false]);
+  });
+});
+
 describe('kairon.explainVariants', () => {
   it('renders every part of the structured explanation with server facts and lists literal numbers', async () => {
     // SCENARIO: the LLM explains from the business case down to the figures, with placeholders, and slips one literal number
