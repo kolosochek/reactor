@@ -58,7 +58,7 @@ describe('the stage 5 demo session recording (DEV-1381)', () => {
   it('holds no widget data and each draft\'s instances once, within 100 KB per draft', () => {
     // SCENARIO: with 14 widgets a run added up to 2.8 MB to a recording; the trace now writes the instances
     //           once, in run.done, and widget data as byte counts
-    // INPUT: demo-session.ndjson, recorded with the sample model on the wave 1 widgets build
+    // INPUT: demo-session.ndjson, recorded with the sample model on the widgets build with cash-line version 2 (DEV-1388)
     // EXPECTED: 12 runs; no widgetData key; no full instance outside the output of run.done; 114 instances for
     //           9 drafts, all of one build; no draft over 100 KB
     const file = fileURLToPath(new URL('./fixtures/kairon/stage5/demo-session.ndjson', import.meta.url));
@@ -105,7 +105,7 @@ describe('the stage 5 demo session recording (DEV-1381)', () => {
       instances: drafts.reduce((sum, draft) => sum + draft.count, 0),
       builds: [...builds],
       overLimit: drafts.filter((draft) => draft.bytes > LIMIT_PER_DRAFT).map((draft) => draft.bytes),
-    }).toEqual({ runs: 12, widgetDataKeys: 0, fullOutsideRunDone: 0, drafts: 9, instances: 114, builds: ['2026-11-15T11:44:54.327Z'], overLimit: [] });
+    }).toEqual({ runs: 12, widgetDataKeys: 0, fullOutsideRunDone: 0, drafts: 9, instances: 114, builds: ['2026-11-15T12:23:27.706Z'], overLimit: [] });
   });
 
   it('gives no draft milestones of its own and names no undated milestone', () => {
@@ -137,5 +137,34 @@ describe('the stage 5 demo session recording (DEV-1381)', () => {
       ],
       [[], [], [], [], []],
     ]);
+  });
+
+  it('holds cash-line at version 2, the active forecast in slot 0 and a draft in slot 1', () => {
+    // SCENARIO: cash-line version 2 carries series { subject, slot, read, points }; the reactor sets no slot (DEV-1388)
+    // INPUT: demo-session.ndjson
+    // EXPECTED: 8 cash-line instances at version 2, every series loaded, no other series; 7 drafts of the active
+    //           forecast as [draft 1, active 0] and the one child draft v1.1 as [draft 1, v1 1]
+    const file = fileURLToPath(new URL('./fixtures/kairon/stage5/demo-session.ndjson', import.meta.url));
+    type Series = { subject: { id: string }; slot: number; read: string };
+    type Cash = { widget: string; version: number; data: { current: Series; baseline: Series[]; others: Series[] } };
+    const cash = readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => JSON.parse(line) as { type: string; payload: { solution?: { output?: { widgets?: { instances?: Record<string, Cash[]> } } } } })
+      .filter((event) => event.type === 'run.done')
+      .flatMap((event) => Object.values(event.payload.solution?.output?.widgets?.instances ?? {}).flat())
+      .filter((instance) => instance.widget === 'cash-line');
+    const pair = (instance: Cash) => [instance.data.current, ...instance.data.baseline].map((series) => `${series.subject.id} ${series.slot}`).join(', ');
+    expect({
+      versions: [...new Set(cash.map((instance) => instance.version))],
+      reads: [...new Set(cash.flatMap((instance) => [instance.data.current, ...instance.data.baseline].map((series) => series.read)))],
+      others: cash.reduce((sum, instance) => sum + instance.data.others.length, 0),
+      pairs: cash.map(pair),
+    }).toEqual({
+      versions: [2],
+      reads: ['loaded'],
+      others: 0,
+      pairs: ['v1 1, active 0', 'v2 1, active 0', 'v3 1, active 0', 'v1 1, active 0', 'v2 1, active 0', 'v3 1, active 0', 'v4 1, active 0', 'v1.1 1, v1 1'],
+    });
   });
 });
